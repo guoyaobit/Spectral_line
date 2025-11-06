@@ -673,11 +673,11 @@ int dpdk()
     // }
     // init port config
     auto lcore_params = generate_lcore_params(ports, queues_per_port, start_dest_port);
-    // int lastcore_id;
+    int lastcore_id;
     for (int i = 0; i < lcore_params.size(); ++i)
     {
-        rte_eal_remote_launch(lcore_recv, &lcore_params[i], lcore_params[i].lcore_id);
-        // rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params[i].lcore_id + lcore_params.size() + 1);
+        rte_eal_remote_launch(lcore_recv, &lcore_params[i], lcore_params[i].lcore_id + 1);
+        rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params[i].lcore_id + lcore_params.size() + 1);
     }
     // lastcore_id = lcore_params[-1].lcore_id + 1;
 
@@ -692,14 +692,14 @@ int dpdk()
     //     }
     // }
 
-    for (int i = 0; i < lcore_params.size(); ++i)
-    {
-        // struct lcore_param *recv_param = new lcore_param;
-        // recv_param->lcore_id = lastcore_id + i;
-        // recv_param->queue_id = i;
-        // lcore_params[i].lcore_id = lastcore_id + i;
-        rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params.size()+i);
-    }
+    // for (int i = 0; i < lcore_params.size(); ++i)
+    // {
+    //     // struct lcore_param *recv_param = new lcore_param;
+    //     // recv_param->lcore_id = lastcore_id + i;
+    //     // recv_param->queue_id = i;
+    //     lcore_params[i].lcore_id = lastcore_id + i;
+    //     rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params[i].lcore_id);
+    // }
     rte_eal_mp_wait_lcore();
     return 0;
 }

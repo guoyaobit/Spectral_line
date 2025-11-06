@@ -60,8 +60,8 @@ public:
         double epoch_offset = epoch * half_year_seconds;
         double t_sec = base_unix_2000 + epoch_offset + seconds_from_epoch
                      + (double)frame_number / frames_per_second;
-        
-        return static_cast<uint64_t>(t_sec*1e9);
+
+        return static_cast<uint64_t>(t_sec * 1e9);
     }
 private:
     std::vector<uint8_t> raw_data;

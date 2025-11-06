@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <iostream>
-// #include <syncstream>
+#include <syncstream>
 #include <inttypes.h>
 #include <VDIF.hpp>
 #include <Globalcfg.hpp>
@@ -217,11 +217,11 @@ public:
 
         auto &cfg = GlobalConfig::getInstance();
         m_config = cfg.subbands[m_subband_id];
-        
+        // printf("%d\n",m_config->windows[0]->header.window_id);
+        // printf("%d\n",m_config->windows[1]->header.window_id);
         m_gpu_id = m_config->gpu_id;
         m_Nfft = cfg.total_nfft;
         m_queueA = &cfg.g_in_queues[m_subband_id * 2];
-
         m_queueB = &cfg.g_in_queues[m_subband_id * 2 + 1];
         m_packets_per_block = m_Nfft / SAMPLES_PER_PACKET;
         m_packets_per_frame = m_num_taps * m_packets_per_block;
@@ -398,7 +398,7 @@ public:
                         max_freq = i;
                     }
                 }
-                printf("%.2f Mhz+%f Mhz\n", m_config->start_freq*1e-6,(float)max_freq / m_Nfft * 256);
+                printf("%f Mhz\n", (float)max_freq / m_Nfft * 256);
                 for (int i = 0; i < m_config->windows.size(); i++)
                 {
                     size_t start_idx = m_config->windows[i]->start_idx;
