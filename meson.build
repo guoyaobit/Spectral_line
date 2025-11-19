@@ -1,6 +1,6 @@
 project('7mm_udp_rx', ['c', 'cpp', 'cuda'],
   version: '1.0',
-  default_options: ['warning_level=2', 'c_std=gnu11', 'cpp_std=c++20']
+  default_options: ['warning_level=2', 'c_std=gnu11', 'cpp_std=c++17']
 )
 
 inc = include_directories('include')

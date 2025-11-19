@@ -398,10 +398,13 @@ public:
                         max_freq = i;
                     }
                 }
-                printf("%.2f Mhz+%f Mhz\n", m_config->start_freq*1e-6,(float)max_freq / m_Nfft * 256);
+
+                printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq*1e-6,max_freq,(float)max_freq *256/ (float)m_Nfft);
+                
                 for (int i = 0; i < m_config->windows.size(); i++)
                 {
                     size_t start_idx = m_config->windows[i]->start_idx;
+                    
                     m_config->windows[i]->header.timestamp_ns = m_timestamp[idx];
                     m_config->windows[i]->sender.send_spectrum(m_config->windows[i]->header, &m_hring[idx][start_idx], channels * sizeof(float4));
                 }

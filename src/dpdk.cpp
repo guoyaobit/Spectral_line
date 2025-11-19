@@ -20,7 +20,7 @@
 #include "VDIF.hpp"
 #include "readerwriterqueue.h"
 #include "readerwritercircularbuffer.h"
-#include <barrier>
+// #include <barrier>
 
 // #include "spdlog/spdlog.h"
 #define RX_RING_SIZE 4096
