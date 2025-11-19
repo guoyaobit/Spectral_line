@@ -96,19 +96,20 @@ extern "C" __global__ void stokes_IQUV_accumulate(
     float yy = fmaf(y_re, y_re, y_im * y_im);
 
     // x * conj(y)
-    float xy_re = fmaf(x_re, y_re, x_im * y_im);  // Re(x*y*)
-    float xy_im = fmaf(x_im, y_re, -x_re * y_im); // Im(x*y*)
+    // float xy_re = fmaf(x_re, y_re, x_im * y_im);  // Re(x*y*)
+    // float xy_im = fmaf(x_im, y_re, -x_re * y_im); // Im(x*y*)
     // Stokes 参数
-    float I = xx + yy;
-    float Q = xx - yy;
-    float U = 2.0f * xy_re;
-    float V = 2.0f * xy_im;
-
+    // float I = xx + yy;
+    // float Q = xx - yy;
+    // float U = 2.0f * xy_re;
+    // float V = 2.0f * xy_im;
+    float x_rey_im = x_re * y_im;
+    float x_imy_re = x_im * y_re;
     // 对应频点做原子加
-    atomicAdd(&pf4SumStokes[idx].x, I);
-    atomicAdd(&pf4SumStokes[idx].y, Q);
-    atomicAdd(&pf4SumStokes[idx].z, U);
-    atomicAdd(&pf4SumStokes[idx].w, V);
+    atomicAdd(&pf4SumStokes[idx].x, xx);
+    atomicAdd(&pf4SumStokes[idx].y, yy);
+    atomicAdd(&pf4SumStokes[idx].z, x_rey_im);
+    atomicAdd(&pf4SumStokes[idx].w, x_imy_re);
 }
 
 extern "C" __global__ void kernel_pfb_sum(
@@ -217,7 +218,7 @@ public:
 
         auto &cfg = GlobalConfig::getInstance();
         m_config = cfg.subbands[m_subband_id];
-        
+
         m_gpu_id = m_config->gpu_id;
         m_Nfft = cfg.total_nfft;
         m_queueA = &cfg.g_in_queues[m_subband_id * 2];
@@ -399,12 +400,12 @@ public:
                     }
                 }
 
-                printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq*1e-6,max_freq,(float)max_freq *256/ (float)m_Nfft);
-                
+                printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
+
                 for (int i = 0; i < m_config->windows.size(); i++)
                 {
                     size_t start_idx = m_config->windows[i]->start_idx;
-                    
+
                     m_config->windows[i]->header.timestamp_ns = m_timestamp[idx];
                     m_config->windows[i]->sender.send_spectrum(m_config->windows[i]->header, &m_hring[idx][start_idx], channels * sizeof(float4));
                 }
