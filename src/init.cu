@@ -5,6 +5,7 @@
 // #include <GpuStokes.h>
 #include <complex>
 #include <thread>
+#include <omp.h>
 std::vector<std::unique_ptr<GpuPfbFft>> g_procspfbfft;
 std::vector<std::thread> g_threadspfbfft;
 
@@ -78,7 +79,6 @@ void subband_thread(int subband_id,
         obj->accumulate_one_block(); // CPU -> GPU 异步拷贝
         obj->submit_PFB_FFT();       // PFB+ FFT
         obj->StokesAcc();            // Stokes kernel
-
         // }
     }
 }
@@ -138,6 +138,7 @@ int init()
     for (size_t s = 0; s < cfg.recv_streams; ++s)
     {
         cfg.g_in_pools[s].resize(pool_size);
+        
         for (size_t b = 0; b < pool_size; ++b)
         {
             cfg.g_in_pools[s][b] = allocatePacketBatch(batchsize);

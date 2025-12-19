@@ -82,7 +82,7 @@ private:
     void parseHeader(const uint8_t* data) {
         uint32_t words[8];
         std::memcpy(words, data, HEADER_SIZE);
-
+// TODO add on/off
         uint32_t word0 = words[0];
         uint32_t word1 = words[1];
         uint32_t word2 = words[2];

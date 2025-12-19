@@ -104,11 +104,13 @@ public:
     const int precision = 1 + 1;  // real 8bit ,image 8bit
     const int packet_size = 8192; // 每个数据包字节数
     int total_nfft = 65536;       // must be multipied by 4096
+    const int Max_nfft = 65536*256;
     float win_bw = 256e6;
     int win_channels = 4096;
     double integration_t = 1;
     int observation_mode = 1; // 默认单窗口分子谱线模式
 
+    // how many packet in one batch
     int batchsize() const { return total_nfft / 4096; }
     // 每次 FFT 的时间长度
     double fft_period() const
@@ -169,6 +171,7 @@ public:
             // get total nfft from para
 
             total_nfft = sampling_rate / win_bw * win_channels;
+            
             // printf("%d\n", total_nfft);
 
             if (config["queue_capacity"])
@@ -263,16 +266,22 @@ public:
             ok = false;
         }
 
-        if (total_nfft <= 0)
+        if (win_channels <= 0)
         {
-            logger_->error(" total_nfft must be > 0");
+            logger_->error(" win_channels must be > 0");
             ok = false;
         }
         if (total_nfft % 4096 != 0)
         {
-            logger_->error(" total_nfft must be a multiple of 4096 (current value: {}", total_nfft);
+            logger_->error(" win_channels* 256e6/bw must be a multiple of 4096 (current value: {}", total_nfft);
             ok = false;
         }
+        if (total_nfft < 65536)
+        {
+            logger_->error(" win_channels* 256e6/bw must >= 65536 {}", win_channels);
+            ok = false;
+        }
+
         if (QUEUE_CAPACITY < 64)
         {
             logger_->error(" queue_capacity must be > 32");

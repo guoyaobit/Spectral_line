@@ -1,13 +1,13 @@
 # recv_streams: 16 
 # total_nfft: 16777216 # Nfft or Fre channels
-# queue_capacity: 256
+queue_capacity: 256
 observation_mode: 1      # 观测模式 0 : baseband 1: spcetrum
 integration_t: 1 # Intergration time s
-win_bw: 1e6 # window bandwidth hz
-win_channels: 65536 # window channels 
-debug: True
+win_bw: 256e6 # window bandwidth hz 1e6,2e6,4e6,32e6,64e6
+win_channels: 65536 # window channels  32768,65536
 Storage_node_ip:  192.168.101.3
 Storage_node_mac: 0c:42:a1:78:84:e4
+
 subbands:
   # recv port from FPGA is  60000,60001
   # send to master node port from 60000
@@ -18,9 +18,9 @@ subbands:
     port : 60000
     windows: 
     - center_freq: 2304e6
-    - center_freq: 2201e6
-    - center_freq: 2202e6
-    - center_freq: 2203e6
+    # - center_freq: 2201e6
+    # - center_freq: 2202e6
+    # - center_freq: 2203e6
   
   # recv port from FPGA is  60002,60003
   - gpu_id: 0
@@ -29,18 +29,24 @@ subbands:
     port : 60001
     windows: 
     - center_freq: 2560e6
-    - center_freq: 2501e6
-    - center_freq: 2502e6
-    - center_freq: 2503e6
+    # - center_freq: 2501e6
+    # - center_freq: 2502e6
+    # - center_freq: 2503e6
 
   # - gpu_id: 1
   #   start_freq: 0
   #   end_freq: 256e6
+  #   port: 60003
+  #   windows: 
+  #   - center_freq: 128e6
 
   # - gpu_id: 1
   #   start_freq: 0
   #   end_freq: 256e6  
-
+  #   port: 60004
+  #   windows: 
+  #   - center_freq: 128e6
+  
   # - gpu_id: 2
   #   start_freq: 0
   #   end_freq: 256e6

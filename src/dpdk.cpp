@@ -451,6 +451,7 @@ recv2mem(void *args)
         batch->timestamps[pkt_idx_inbatch] = m_timestamp;
         // copy one packet data to struct
         rte_memcpy(pkt->payload, rte_pktmbuf_mtod(mbuf, uint8_t *) + 42 + 32, 8192);
+        
         rte_pktmbuf_free(mbuf);
         pkt_idx_inbatch++;
 
@@ -459,9 +460,9 @@ recv2mem(void *args)
             // get one fft data，push to the queue
             if (!queue.try_enqueue(batch))
             {
-                PacketBatch *trash;
-                queue.try_dequeue(trash);
-                queue.try_enqueue(batch);
+                // PacketBatch *trash;
+                // queue.try_dequeue(trash);
+                // queue.try_enqueue(batch);
                 cfg.logger_->error("Pktdata to Queue {} is full and overwrite", stream_id);
             }
             pkt_idx_inbatch = 0;
@@ -664,6 +665,7 @@ int dpdk()
     // 初始化端口 0
     if (port_init(0, mbuf_pool, queues_per_port) != 0)
         rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", 0);
+    // 初始化端口 1
     if (port_init(1, mbuf_pool, queues_per_port) != 0)
         rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", 0);
     // for (uint16_t port = 0; port < MAX_PORTS; ++port)
@@ -671,6 +673,7 @@ int dpdk()
     //     if (port_init(port, mbuf_pool, queues_per_port) != 0)
     //         rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", port);
     // }
+    
     // init port config
     auto lcore_params = generate_lcore_params(ports, queues_per_port, start_dest_port);
     int lastcore_id;
@@ -679,6 +682,7 @@ int dpdk()
         rte_eal_remote_launch(lcore_recv, &lcore_params[i], lcore_params[i].lcore_id + 1);
         rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params[i].lcore_id + lcore_params.size() + 1);
     }
+    
     // lastcore_id = lcore_params[-1].lcore_id + 1;
 
     // // init threads

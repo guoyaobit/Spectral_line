@@ -43,10 +43,8 @@
 // each VDIF packet bytes and samples
 static constexpr size_t PKT_DATA_BYTES = 8192;
 static constexpr size_t SAMPLES_PER_PACKET = PKT_DATA_BYTES / 2; // 4096 complex samples (int8 Re/Im)
-
 // complex float type (cuFFT uses cufftComplex)
 using complexf = cufftComplex;
-
 // extern "C" __global__ void kernel_pfb_sum(
 //     const complexf *__restrict__ ring, // in
 //     const complexf *__restrict__ taps, // pfb windows
@@ -239,22 +237,22 @@ public:
         // CUDA_CHECK(cudaStreamCreate(&m_streamB));
 
         // H2D streams
-        cudaStreamCreate(&sH2DA);
-        cudaStreamCreate(&sH2DB);
+        cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sH2DB,cudaStreamNonBlocking);
 
         // 数据转换 streams
-        cudaStreamCreate(&sConvA);
-        cudaStreamCreate(&sConvB);
+        cudaStreamCreateWithFlags(&sConvA ,cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sConvB,cudaStreamNonBlocking);
 
         // PFB + FFT streams
-        cudaStreamCreate(&sPFBA);
-        cudaStreamCreate(&sPFBB);
+        cudaStreamCreateWithFlags(&sPFBA,cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sPFBB,cudaStreamNonBlocking);
 
         // Stokes + 积分 stream
-        cudaStreamCreate(&sStokes);
+        cudaStreamCreateWithFlags(&sStokes,cudaStreamNonBlocking);
 
         // GPU->CPU D2H stream
-        cudaStreamCreate(&sD2H);
+        cudaStreamCreateWithFlags(&sD2H,cudaStreamNonBlocking);
 
         // allocate device buffers:
         CUDA_CHECK(cudaMalloc((void **)&m_rawA, m_Nfft * 2)); // rawdata formart unit8 re+imag
@@ -528,14 +526,14 @@ public:
         // CUDA_CHECK(cudaStreamSynchronize(sH2DA));
         m_queueB->wait_dequeue(readblockB);
         // CUDA_CHECK(cudaStreamSynchronize(sH2DB));
-        if (m_queueA->size_approx() > 100)
+        if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY*0.95)
             cfg.logger_->debug("Buffed {} batch in queue", m_queueA->size_approx());
         // printf("Got dual block data on sub band %d", m_subband_id);
         // TODO GOT PKT ID FROM PKT
         size_t m_pktidA = readblockA->pkt_id[0];
         size_t m_pktidB = readblockB->pkt_id[0];
-        if (m_pktidA != m_pktidB)
-            cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
+        // if (m_pktidA != m_pktidB)
+        //     cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
         m_timestamp[m_hhead] = readblockA->timestamps[0];
 
         cudaMemcpyAsync(m_rawA, readblockA->buffer, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, sH2DA);
