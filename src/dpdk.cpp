@@ -20,6 +20,7 @@
 #include "VDIF.hpp"
 #include "readerwriterqueue.h"
 #include "readerwritercircularbuffer.h"
+#include <chrono>
 // #include <barrier>
 
 // #include "spdlog/spdlog.h"
@@ -261,8 +262,9 @@ port_init(uint16_t port, struct rte_mempool *mbuf_pool, uint16_t nb_rx_queues)
     // create_catch_all_flow(port,i+1);
     create_catch_all_drop(port);
     // printf("🚀 Port %d ready, listening on UDP 60000-60003\n", port);
-
-    // rte_eth_promiscuous_enable(port);
+    // disable promisc
+    rte_eth_promiscuous_disable(port);
+    rte_eth_allmulticast_disable(port);
     return 0;
 }
 
@@ -318,8 +320,15 @@ lcore_recv(void *arg)
                 rte_pktmbuf_free(mbuf);
                 continue;
             }
+
             struct rte_udp_hdr *udp_hdr = (struct rte_udp_hdr *)((unsigned char *)ip_hdr + sizeof(struct rte_ipv4_hdr));
-            // uint32_t dst_ip = rte_be_to_cpu_32(ip_hdr->dst_addr);
+            //
+            if (rte_be_to_cpu_32(ip_hdr->dst_addr) != 0x0A11100B)
+            {
+
+                rte_pktmbuf_free(mbuf);
+            }
+
             uint16_t dst_port = rte_be_to_cpu_16(udp_hdr->dst_port);
 
             // if (queue_id < cfg.recv_streams)
@@ -359,6 +368,12 @@ recv2mem(void *args)
     cfg.logger_->debug("Batchsize is {}", pool[0]->pkts.size());
     struct rte_mbuf *bufs[BURST_SIZE];
     int tx_idx = 0;
+    uint64_t total_lostnmber = 0;
+    uint64_t total_pkts = 0;
+    uint32_t pre_NosieSoureState = 0xff;
+    static auto start_time = std::chrono::steady_clock::now();
+    static auto last_change_time = start_time;
+    double duration;
     while (1)
     {
         int ret = rte_ring_dequeue(ring, (void **)&mbuf);
@@ -366,11 +381,24 @@ recv2mem(void *args)
         {
             continue;
         }
+        total_pkts++;
         VDIFPacket header(rte_pktmbuf_mtod(mbuf, uint8_t *) + 42, 32);
         uint64_t m_seconds = header.getSecondsFromEpoch();
         uint64_t m_frame_number = header.getFrameNumber();
         uint64_t m_timestamp = header.getTimestamp();
 
+        uint32_t m_NosieSoureState = header.getNoiseSourceSate();
+        if (pre_NosieSoureState == 0xff)
+            pre_NosieSoureState = m_NosieSoureState;
+        if (pre_NosieSoureState != m_NosieSoureState && cfg.Debug_mode)
+        {
+            auto now = std::chrono::steady_clock::now();
+            duration = std::chrono::duration<double>(now - last_change_time).count();
+            std::cout << duration << "s ,Noise State change to : " << m_NosieSoureState << std::endl;
+            pre_NosieSoureState = m_NosieSoureState;
+            last_change_time = now;
+            cfg.logger_->info("last state duration is {} s", duration);
+        }
         // log_packet(logfile, m_seconds, m_frame_number);
         // fflush(logfile);
         uint64_t recv_packet_id = m_seconds * 62500ULL + m_frame_number;
@@ -387,9 +415,28 @@ recv2mem(void *args)
             if (global_packet_id != recv_packet_id)
             {
                 uint64_t lostnmber = recv_packet_id - global_packet_id;
-                cfg.logger_->warn("m_seconds {}, m_frame_number {},recv_packet_id:{} , global_packet_id: {} ,lost {} packets ,on stream {}",
-                                  m_seconds, m_frame_number, recv_packet_id, global_packet_id, lostnmber, stream_id);
+                total_lostnmber += lostnmber;
+                cfg.logger_->warn("Stream {}:total_lostnmber {},m_seconds {}, m_frame_number {},recv_packet_id:{} , global_packet_id: {} ,lost {} packets",
+                                  stream_id, total_lostnmber, m_seconds, m_frame_number, recv_packet_id, global_packet_id, lostnmber);
                 global_packet_id = recv_packet_id + 1;
+                double loss_rate = static_cast<double>(total_lostnmber) / (total_lostnmber + total_pkts);
+                if (cfg.Debug_mode)
+                {
+                    std::time_t t = std::time(nullptr);
+                    std::cout << std::ctime(&t)
+
+                              << "stream: " << stream_id
+
+                              << " lost: " << lostnmber
+
+                              << " total_lost: " << total_lostnmber
+
+                              << " total received: " << total_pkts
+
+                              << " loss_rate: " << std::scientific << std::setprecision(2) << loss_rate
+
+                              << std::endl;
+                }
             }
             else
             {
@@ -446,12 +493,24 @@ recv2mem(void *args)
             continue;
         }
         PacketBatch *batch = pool[pool_idx];
+        uint batchsize = batch->pkts.size();
+
+        // Change: In one batch,recv_packet_id%batchsize keep from 0 to batchsize -1.
+        if (pkt_idx_inbatch != recv_packet_id % batchsize)
+        {
+            // TODO
+            // case 1 first pkt not equl 0.
+            // case 2 lost pkt
+            // case 3 : two steam not sync.
+            // check pktid in one batch is seque
+            rte_pktmbuf_free(mbuf);
+            continue;
+        }
         Packet *pkt = batch->pkts[pkt_idx_inbatch];
         batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
         batch->timestamps[pkt_idx_inbatch] = m_timestamp;
         // copy one packet data to struct
         rte_memcpy(pkt->payload, rte_pktmbuf_mtod(mbuf, uint8_t *) + 42 + 32, 8192);
-        
         rte_pktmbuf_free(mbuf);
         pkt_idx_inbatch++;
 
@@ -616,7 +675,6 @@ int dpdk()
     int ret = rte_eal_init(argc, argv);
     if (ret < 0)
         rte_exit(EXIT_FAILURE, "Error with EAL init\n");
-    
 
     struct rte_mempool *mbuf_pool = rte_pktmbuf_pool_create("MBUF_POOL",
                                                             NUM_MBUFS * 2, MBUF_CACHE_SIZE, 0, 10240,
@@ -661,28 +719,28 @@ int dpdk()
     //     60007,
     //     60008,
     // }
-    std::vector<uint16_t> ports = {0, 1};
+    std::vector<uint16_t> ports = {0};
     // 初始化端口 0
     if (port_init(0, mbuf_pool, queues_per_port) != 0)
         rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", 0);
     // 初始化端口 1
-    if (port_init(1, mbuf_pool, queues_per_port) != 0)
-        rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", 0);
+    // if (port_init(1, mbuf_pool, queues_per_port) != 0)
+    //     rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", 0);
     // for (uint16_t port = 0; port < MAX_PORTS; ++port)
     // {
     //     if (port_init(port, mbuf_pool, queues_per_port) != 0)
     //         rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", port);
     // }
-    
+
     // init port config
     auto lcore_params = generate_lcore_params(ports, queues_per_port, start_dest_port);
     int lastcore_id;
     for (int i = 0; i < lcore_params.size(); ++i)
     {
-        rte_eal_remote_launch(lcore_recv, &lcore_params[i], lcore_params[i].lcore_id + 1);
-        rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params[i].lcore_id + lcore_params.size() + 1);
+        rte_eal_remote_launch(lcore_recv, &lcore_params[i], lcore_params[i].lcore_id);
+        rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params[i].lcore_id + lcore_params.size());
     }
-    
+
     // lastcore_id = lcore_params[-1].lcore_id + 1;
 
     // // init threads

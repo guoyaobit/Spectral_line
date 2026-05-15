@@ -98,13 +98,14 @@ public:
         printf("程序启动，日志文件: %s\n", logfile.c_str());
     }
     // default para
+    bool Debug_mode = false;
     int recv_streams = 16;
     const int sampling_rate = 256e6; // samaping rate
-    std::string Storage_node_ip,Storage_node_mac;
+    std::string Storage_node_ip, Storage_node_mac;
     const int precision = 1 + 1;  // real 8bit ,image 8bit
     const int packet_size = 8192; // 每个数据包字节数
     int total_nfft = 65536;       // must be multipied by 4096
-    const int Max_nfft = 65536*256;
+    const int Max_nfft = 65536 * 256;
     float win_bw = 256e6;
     int win_channels = 4096;
     double integration_t = 1;
@@ -137,7 +138,8 @@ public:
         try
         {
             YAML::Node config = YAML::LoadFile(filename);
-            // std::cout<<recv_streams<<std::endl;
+            if (config["Debug"])
+                Debug_mode = config["Debug"].as<bool>();
             if (config["recv_streams"])
                 recv_streams = config["recv_streams"].as<int>();
 
@@ -149,18 +151,14 @@ public:
             {
                 Storage_node_ip = "127.0.0.1"; // 默认值
             }
-            if(config["Storage_node_mac"] && config["Storage_node_mac"].IsScalar())
+            if (config["Storage_node_mac"] && config["Storage_node_mac"].IsScalar())
             {
-                Storage_node_mac =config["Storage_node_mac"].as<std::string>();
+                Storage_node_mac = config["Storage_node_mac"].as<std::string>();
             }
-            else{
+            else
+            {
                 throw std::runtime_error("配置文件缺少 Storage_node_mac!");
             }
-            // std::cout<<recv_streams<<std::endl;
-            // if (config["sampling_rate"])
-            //     sampling_rate = config["sampling_rate"].as<int64_t>();
-            // if (config["total_nfft"])
-            //     total_nfft = config["total_nfft"].as<int>();
 
             if (config["win_bw"])
                 win_bw = config["win_bw"].as<float>();
@@ -171,7 +169,7 @@ public:
             // get total nfft from para
 
             total_nfft = sampling_rate / win_bw * win_channels;
-            
+
             // printf("%d\n", total_nfft);
 
             if (config["queue_capacity"])
