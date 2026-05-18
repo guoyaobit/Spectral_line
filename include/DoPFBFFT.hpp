@@ -238,21 +238,21 @@ public:
 
         // H2D streams
         cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking);
-        cudaStreamCreateWithFlags(&sH2DB,cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sH2DB, cudaStreamNonBlocking);
 
         // 数据转换 streams
-        cudaStreamCreateWithFlags(&sConvA ,cudaStreamNonBlocking);
-        cudaStreamCreateWithFlags(&sConvB,cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sConvA, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sConvB, cudaStreamNonBlocking);
 
         // PFB + FFT streams
-        cudaStreamCreateWithFlags(&sPFBA,cudaStreamNonBlocking);
-        cudaStreamCreateWithFlags(&sPFBB,cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sPFBA, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sPFBB, cudaStreamNonBlocking);
 
         // Stokes + 积分 stream
-        cudaStreamCreateWithFlags(&sStokes,cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sStokes, cudaStreamNonBlocking);
 
         // GPU->CPU D2H stream
-        cudaStreamCreateWithFlags(&sD2H,cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&sD2H, cudaStreamNonBlocking);
 
         // allocate device buffers:
         CUDA_CHECK(cudaMalloc((void **)&m_rawA, m_Nfft * 2)); // rawdata formart unit8 re+imag
@@ -377,12 +377,37 @@ public:
     //     auto total_BW = m_config[m_subband_id].BW;
 
     // }
+    bool set_static_arp(const std::string& ip,
+                        const std::string& mac,
+                        const std::string& dev)
+    {
+        std::string cmd =
+            "ip neigh replace " + ip +
+            " lladdr " + mac +
+            " dev " + dev +
+            " nud permanent";
+
+        int ret = system(cmd.c_str());
+
+        return (ret == 0);
+    }
     void send_data()
     {
         int idx = 0;
 
         auto &cfg = GlobalConfig::getInstance();
         int channels = cfg.win_channels;
+        if (set_static_arp(cfg.Storage_node_ip,
+                        cfg.Storage_node_mac,
+                        cfg.Sender_Nic
+                        ))
+        {
+            cfg.logger_->info("Static ARP set success\n");
+        }
+        else
+        {
+            cfg.logger_->error("Static ARP set failed\n");
+        }
         while (1)
         {
             if (cudaEventQuery(m_hevents[idx]) == cudaSuccess && m_hused[idx])
@@ -397,8 +422,8 @@ public:
                         max_freq = i;
                     }
                 }
-
-                printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
+                if(cfg.Debug_mode)
+                    printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
 
                 for (int i = 0; i < m_config->windows.size(); i++)
                 {
@@ -488,7 +513,7 @@ public:
                 max_freq = i;
             }
         }
-        printf("%f Mhz  \n", (float)max_freq / m_Nfft * 256);
+        // printf("%f Mhz  \n", (float)max_freq / m_Nfft * 256);
         // std::ofstream ofs(m_fname, std::ios::binary);
         // ofs.write(reinterpret_cast<char *>(m_h_result), m_Nfft * sizeof(float4));
         // ofs.close();
@@ -526,14 +551,15 @@ public:
         // CUDA_CHECK(cudaStreamSynchronize(sH2DA));
         m_queueB->wait_dequeue(readblockB);
         // CUDA_CHECK(cudaStreamSynchronize(sH2DB));
-        if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY*0.95)
+        if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95)
             cfg.logger_->debug("Buffed {} batch in queue", m_queueA->size_approx());
         // printf("Got dual block data on sub band %d", m_subband_id);
         // TODO GOT PKT ID FROM PKT
+        
         size_t m_pktidA = readblockA->pkt_id[0];
         size_t m_pktidB = readblockB->pkt_id[0];
-        // if (m_pktidA != m_pktidB)
-        //     cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
+        if (m_pktidA != m_pktidB)
+            cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
         m_timestamp[m_hhead] = readblockA->timestamps[0];
 
         cudaMemcpyAsync(m_rawA, readblockA->buffer, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, sH2DA);

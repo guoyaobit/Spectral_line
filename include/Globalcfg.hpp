@@ -101,7 +101,7 @@ public:
     bool Debug_mode = false;
     int recv_streams = 16;
     const int sampling_rate = 256e6; // samaping rate
-    std::string Storage_node_ip, Storage_node_mac;
+    std::string Storage_node_ip,Storage_node_mac,Sender_Nic;
     const int precision = 1 + 1;  // real 8bit ,image 8bit
     const int packet_size = 8192; // 每个数据包字节数
     int total_nfft = 65536;       // must be multipied by 4096
@@ -158,6 +158,14 @@ public:
             else
             {
                 throw std::runtime_error("配置文件缺少 Storage_node_mac!");
+            }
+            if (config["Sender_Nic"] && config["Sender_Nic"].IsScalar())
+            {
+                Sender_Nic = config["Sender_Nic"].as<std::string>();
+            }
+            else
+            {
+                throw std::runtime_error("配置文件缺少 Sender_Nic!");
             }
 
             if (config["win_bw"])
