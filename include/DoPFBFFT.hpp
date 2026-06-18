@@ -339,6 +339,8 @@ public:
         //     std::cerr << "Failed to open file" << std::endl;
         // }
         m_acc_len = cfg.integration_time() / cfg.fft_period();
+        cal_blank_len = 10e-3 / cfg.fft_period(); // drop 10ms before and after cal trigger.
+        // printf("%d\n",cal_blank_len);
         // printf("%f,%f\n",cfg.integration_time(),cfg.fft_period());
         // printf("acc_len = %d\n",m_acc_len);
         // std::string fname = "subband_" + std::to_string(m_subband_id);
@@ -357,6 +359,7 @@ public:
         m_hevents.resize(NUM_SLOTS);
         m_hused.resize(NUM_SLOTS, false);
         m_timestamp.resize(NUM_SLOTS);
+        acc_noise_state.resize(NUM_SLOTS);
 
         for (int i = 0; i < NUM_SLOTS; i++)
         {
@@ -377,9 +380,9 @@ public:
     //     auto total_BW = m_config[m_subband_id].BW;
 
     // }
-    bool set_static_arp(const std::string& ip,
-                        const std::string& mac,
-                        const std::string& dev)
+    bool set_static_arp(const std::string &ip,
+                        const std::string &mac,
+                        const std::string &dev)
     {
         std::string cmd =
             "ip neigh replace " + ip +
@@ -398,9 +401,8 @@ public:
         auto &cfg = GlobalConfig::getInstance();
         int channels = cfg.win_channels;
         if (set_static_arp(cfg.Storage_node_ip,
-                        cfg.Storage_node_mac,
-                        cfg.Sender_Nic
-                        ))
+                           cfg.Storage_node_mac,
+                           cfg.Sender_Nic))
         {
             cfg.logger_->info("Static ARP set success\n");
         }
@@ -408,6 +410,7 @@ public:
         {
             cfg.logger_->error("Static ARP set failed\n");
         }
+
         while (1)
         {
             if (cudaEventQuery(m_hevents[idx]) == cudaSuccess && m_hused[idx])
@@ -422,14 +425,15 @@ public:
                         max_freq = i;
                     }
                 }
-                if(cfg.Debug_mode)
+                if (cfg.Debug_mode)
                     printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
-
+                // std::cout << acc_noise_state[idx] << std::endl;
                 for (int i = 0; i < m_config->windows.size(); i++)
                 {
                     size_t start_idx = m_config->windows[i]->start_idx;
 
                     m_config->windows[i]->header.timestamp_ns = m_timestamp[idx];
+                    m_config->windows[i]->header.noise_state = acc_noise_state[idx];
                     m_config->windows[i]->sender.send_spectrum(m_config->windows[i]->header, &m_hring[idx][start_idx], channels * sizeof(float4));
                 }
                 m_hused[idx] = false;
@@ -555,13 +559,38 @@ public:
             cfg.logger_->debug("Buffed {} batch in queue", m_queueA->size_approx());
         // printf("Got dual block data on sub band %d", m_subband_id);
         // TODO GOT PKT ID FROM PKT
-        
         size_t m_pktidA = readblockA->pkt_id[0];
         size_t m_pktidB = readblockB->pkt_id[0];
-        if (m_pktidA != m_pktidB)
-            cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
-        m_timestamp[m_hhead] = readblockA->timestamps[0];
+        if (cfg.Debug_mode)
+        {
+            // if (m_pktidA != m_pktidB)
+            // cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
+        }
+        if (cfg.cal_mode)
+        {
+            auto m_noise_state = readblockA->noise_state[0];
+            cal_mode_unstable = false;
+            for (int i = 0; i < cfg.batchsize(); i++)
+            {
+                if (readblockA->noise_state[i] != m_noise_state or readblockB->noise_state[i] != m_noise_state)
+                {
+                    if (cfg.Debug_mode)
+                    {
+                        cfg.logger_->info("Got one batch data,while cal state changes");
+                    }
+                    cal_mode_unstable = true;
+                }
+            }
+            if (m_acc_id == cal_blank_len)
+                noise_state = readblockA->noise_state[0];
+        }
 
+        // if (cal_mode_unstable)
+        // {
+        //     memset(readblockA->buffer, 0, cfg.batchsize() * sizeof(Packet));
+        //     memset(readblockB->buffer, 0, cfg.batchsize() * sizeof(Packet));
+        // }
+        m_timestamp[m_hhead] = readblockA->timestamps[0];
         cudaMemcpyAsync(m_rawA, readblockA->buffer, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, sH2DA);
         cudaEventRecord(evtH2DA_done, sH2DA);
         cudaMemcpyAsync(m_rawB, readblockB->buffer, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, sH2DB);
@@ -618,6 +647,7 @@ public:
 
     void StokesAcc()
     {
+        auto &cfg = GlobalConfig::getInstance();
         // int idx = head % NUM_SLOTS;
         int blockSize = 256; //
         int gridSize = (m_Nfft + blockSize - 1) / blockSize;
@@ -626,11 +656,20 @@ public:
         // DO stockes and Acc
         cudaStreamWaitEvent(sStokes, evtPFBA_done, 0);
         cudaStreamWaitEvent(sStokes, evtPFBB_done, 0);
+        if (cfg.cal_mode)
+        {
+            if (m_acc_id < cal_blank_len or (m_acc_len - m_acc_id) < cal_blank_len)
+            {
+                size_t device_pfbed_bytes = m_Nfft * sizeof(complexf);
+                cudaMemsetAsync(m_ffted_bufsA, 0, device_pfbed_bytes,sStokes);
+                cudaMemsetAsync(m_ffted_bufsB, 0, device_pfbed_bytes,sStokes);
+            }
+        }
         stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sStokes>>>(
             m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_IQUV);
 
         (m_acc_id)++;
-        if (m_acc_id == m_acc_len)
+        if (m_acc_id >= m_acc_len)
         {
             cudaEventRecord(evtStokes_done, sStokes);
             // TODO gpu ring output
@@ -638,11 +677,12 @@ public:
             m_acc_id = 0;
             cudaMemcpyAsync(m_hring[m_hhead], m_acc_stokes_IQUV, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
             // cudaLaunchHostFunc(sD2H, GpuPfbFft::write_callback, this);
-
             cudaEventRecord(m_hevents[m_hhead], sD2H);
             m_hused[m_hhead] = true;
+            acc_noise_state[m_hhead] = noise_state;
             CUDA_CHECK(cudaMemsetAsync(m_acc_stokes_IQUV, 0, m_Nfft * sizeof(float4), sD2H));
             m_hhead = (m_hhead + 1) % NUM_SLOTS;
+            acc_noise_state[m_hhead] = 0;
         }
 
         // CUDA_CHECK(cudaStreamSynchronize(m_stream));
@@ -708,7 +748,9 @@ private:
     float4 *m_acc_stokes_IQUV;
     int m_acc_len;
     int m_acc_id = 0;
-
+    bool cal_mode_unstable = false;
+    int cal_blank_len = 0;
+    bool noise_state = false;
     int m_resframe_id = 0;
     // kernel launch parameters
     int m_blk_convert = 256;
@@ -731,6 +773,7 @@ private:
     std::vector<cudaEvent_t> m_hevents; // 每槽传输完成事件
     std::vector<bool> m_hused;
     std::vector<uint64_t> m_timestamp;
+    std::vector<uint32_t> acc_noise_state;
     int m_hhead = 0; // GPU 写入位置
     SubbandConfig *m_config;
 };

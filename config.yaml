@@ -1,9 +1,14 @@
 # recv_streams: 16 
 # total_nfft: 16777216 # Nfft or Fre channels
-Debug: False
+Debug: true
 queue_capacity: 16384
 observation_mode: 1      # 观测模式 0 : baseband 1: spcetrum
-integration_t: 1 # Intergration time s
+cal_mode: true
+# blanking  time 10ms before and after
+# cal_on_t: 5 # on time
+# cal_off_t: 5 # off time
+integration_t: 1 # Intergration time s 
+#
 win_bw: 256e6 # window bandwidth hz 1e6,2e6,4e6,32e6,64e6
 win_channels: 65536 # window channels  32768,65536
 Storage_node_ip:  192.168.101.3

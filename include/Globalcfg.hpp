@@ -23,6 +23,8 @@ struct PacketBatch
 {
     int count;
     std::vector<uint> pkt_id;
+    std::vector<bool> noise_state;
+    bool vaild= true;
     std::vector<uint64_t> timestamps;
     Packet *buffer;             // 连续大 buffer
     std::vector<Packet *> pkts; // 一次 FFT 的数据包集合
@@ -110,6 +112,7 @@ public:
     int win_channels = 4096;
     double integration_t = 1;
     int observation_mode = 1; // 默认单窗口分子谱线模式
+    bool cal_mode = false;
 
     // how many packet in one batch
     int batchsize() const { return total_nfft / 4096; }
@@ -186,7 +189,8 @@ public:
                 observation_mode = config["observation_mode"].as<int>();
             if (config["integration_t"])
                 integration_t = config["integration_t"].as<double>();
-
+            if(config["cal_mode"])
+                cal_mode = config["cal_mode"].as<bool>();
             if (!config["subbands"] || !config["subbands"].IsSequence())
             {
                 throw std::runtime_error("配置文件缺少 subbands config!");

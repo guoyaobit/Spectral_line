@@ -370,10 +370,11 @@ recv2mem(void *args)
     int tx_idx = 0;
     uint64_t total_lostnmber = 0;
     uint64_t total_pkts = 0;
-    uint32_t pre_NosieSoureState = 0xff;
+    uint32_t pre_NosieSoureState = 0xff;// magic number, means uninitialized state
     static auto start_time = std::chrono::steady_clock::now();
     static auto last_change_time = start_time;
     double duration;
+    bool cal_vaild = false;
     while (1)
     {
         int ret = rte_ring_dequeue(ring, (void **)&mbuf);
@@ -386,19 +387,32 @@ recv2mem(void *args)
         uint64_t m_seconds = header.getSecondsFromEpoch();
         uint64_t m_frame_number = header.getFrameNumber();
         uint64_t m_timestamp = header.getTimestamp();
-
         uint32_t m_NosieSoureState = header.getNoiseSourceSate();
-        if (pre_NosieSoureState == 0xff)
-            pre_NosieSoureState = m_NosieSoureState;
-        if (pre_NosieSoureState != m_NosieSoureState && cfg.Debug_mode)
+        if (cfg.cal_mode)
         {
-            auto now = std::chrono::steady_clock::now();
-            duration = std::chrono::duration<double>(now - last_change_time).count();
-            std::cout << duration << "s ,Noise State change to : " << m_NosieSoureState << std::endl;
-            pre_NosieSoureState = m_NosieSoureState;
-            last_change_time = now;
-            cfg.logger_->info("last state duration is {} s", duration);
+            if (pre_NosieSoureState == 0xff)
+                pre_NosieSoureState = m_NosieSoureState;
+            if (pre_NosieSoureState != m_NosieSoureState)// state changed
+            {
+                if (cfg.Debug_mode)
+                {
+                    auto now = std::chrono::steady_clock::now();
+                    duration = std::chrono::duration<double>(now - last_change_time).count();
+                    std::cout << duration << "s ,Noise State change to : " << m_NosieSoureState << std::endl;
+                    pre_NosieSoureState = m_NosieSoureState;
+                    last_change_time = now;
+                    cfg.logger_->info("last state duration is {} s", duration);
+                }
+                if (!cal_vaild)// first state change, start to calculate
+                    cal_vaild = true;
+            }
+            if (!cal_vaild) // state not change, and first state not change, not start to calculate
+               {
+                rte_pktmbuf_free(mbuf);
+                continue;
+               }
         }
+
         // log_packet(logfile, m_seconds, m_frame_number);
         // fflush(logfile);
         uint64_t recv_packet_id = m_seconds * 62500ULL + m_frame_number;
@@ -503,11 +517,12 @@ recv2mem(void *args)
             // case 2 lost pkt
             // case 3 : two steam not sync.
             // check pktid in one batch is seque
-            rte_pktmbuf_free(mbuf);
-            continue;
+            // rte_pktmbuf_free(mbuf);
+            // continue;
         }
         Packet *pkt = batch->pkts[pkt_idx_inbatch];
         batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
+        batch->noise_state[pkt_idx_inbatch] = m_NosieSoureState;
         batch->timestamps[pkt_idx_inbatch] = m_timestamp;
         // copy one packet data to struct
         rte_memcpy(pkt->payload, rte_pktmbuf_mtod(mbuf, uint8_t *) + 42 + 32, 8192);
