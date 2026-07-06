@@ -472,54 +472,54 @@ recv2mem(void *args)
             }
         }
 
-        if (cfg.observation_mode == 0)
-        {
-            // 解析头部
-            struct rte_ether_hdr *eth = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-            struct rte_ipv4_hdr *ipv4 = (struct rte_ipv4_hdr *)(eth + 1);
-            struct rte_udp_hdr *udp = (struct rte_udp_hdr *)(ipv4 + 1);
+        // if (cfg.observation_mode == 0)
+        // {
+        // // 解析头部
+        // struct rte_ether_hdr *eth = rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+        // struct rte_ipv4_hdr *ipv4 = (struct rte_ipv4_hdr *)(eth + 1);
+        // struct rte_udp_hdr *udp = (struct rte_udp_hdr *)(ipv4 + 1);
 
-            // 修改目的 MAC
-            struct rte_ether_addr new_dst_mac;
-            // .addr_bytes = {0x0c, 0x42, 0xa1, 0x78, 0x84, 0xe4}};
+        // // 修改目的 MAC
+        // struct rte_ether_addr new_dst_mac;
+        // .addr_bytes = {0x0c, 0x42, 0xa1, 0x78, 0x84, 0xe4}};
 
-            if (rte_ether_unformat_addr(cfg.Storage_node_mac.c_str(), &new_dst_mac) == 0)
-            {
-                rte_ether_addr_copy(&new_dst_mac, &eth->dst_addr);
-            }
-            else
-            {
-                printf("Invalid MAC address format: %s\n", cfg.Storage_node_mac.data());
-            }
-            // rte_ether_addr_copy(&new_dst_mac, &eth->dst_addr);
+        // if (rte_ether_unformat_addr(cfg.Storage_node_mac.c_str(), &new_dst_mac) == 0)
+        // {
+        //     rte_ether_addr_copy(&new_dst_mac, &eth->dst_addr);
+        // }
+        // else
+        // {
+        //     printf("Invalid MAC address format: %s\n", cfg.Storage_node_mac.data());
+        // }
+        // rte_ether_addr_copy(&new_dst_mac, &eth->dst_addr);
 
-            // // 修改源 MAC（可选）
-            // struct rte_ether_addr src_mac;
-            // rte_eth_macaddr_get(param->port_id, &src_mac);
-            // rte_ether_addr_copy(&src_mac, &eth->src_addr);
-            // ipv4->src_addr = rte_cpu_to_be_32(RTE_IPV4(192, 168, 101, 1));
-            // 修改目的 IP
-            if (inet_pton(AF_INET, cfg.Storage_node_ip.c_str(), &ipv4->dst_addr) != 1)
-            {
-                printf("Invalid IP: %s\n", cfg.Storage_node_ip.c_str());
-                exit(0);
-            }
-            // ipv4->dst_addr = rte_cpu_to_be_32(RTE_IPV4(192, 168, 101, 3));
-            bufs[tx_idx++] = mbuf;
+        // // 修改源 MAC（可选）
+        // struct rte_ether_addr src_mac;
+        // rte_eth_macaddr_get(param->port_id, &src_mac);
+        // rte_ether_addr_copy(&src_mac, &eth->src_addr);
+        // ipv4->src_addr = rte_cpu_to_be_32(RTE_IPV4(192, 168, 101, 1));
+        // 修改目的 IP
+        // if (inet_pton(AF_INET, cfg.Storage_node_ip.c_str(), &ipv4->dst_addr) != 1)
+        // {
+        //     printf("Invalid IP: %s\n", cfg.Storage_node_ip.c_str());
+        //     exit(0);
+        // }
+        // // ipv4->dst_addr = rte_cpu_to_be_32(RTE_IPV4(192, 168, 101, 3));
+        // bufs[tx_idx++] = mbuf;
 
-            if (tx_idx == BURST_SIZE)
-            {
-                uint16_t sent = rte_eth_tx_burst(param->port_id, param->queue_id, bufs, BURST_SIZE);
-                if (sent < BURST_SIZE)
-                {
-                    for (uint16_t i = sent; i < BURST_SIZE; i++)
-                        rte_pktmbuf_free(bufs[i]);
-                    printf("send full ! \n");
-                }
-                tx_idx = 0;
-            }
-            continue;
-        }
+        // if (tx_idx == BURST_SIZE)
+        // {
+        //     uint16_t sent = rte_eth_tx_burst(param->port_id, param->queue_id, bufs, BURST_SIZE);
+        //     if (sent < BURST_SIZE)
+        //     {
+        //         for (uint16_t i = sent; i < BURST_SIZE; i++)
+        //             rte_pktmbuf_free(bufs[i]);
+        //         printf("send full ! \n");
+        //     }
+        //     tx_idx = 0;
+        // }
+        // continue;
+        // }
         PacketBatch *batch = pool[pool_idx]; // 获取当前 batch
         if (batchid != prebatchid)
         {

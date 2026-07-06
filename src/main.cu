@@ -26,6 +26,11 @@ int main()
     {
         return false;
     }
+    if(cfg.observation_mode == 0)
+    {
+        cfg.total_nfft = 65536;
+        cfg.QUEUE_CAPACITY = 16384;
+    }
     // init memory
     init();
     // start dpdk trhead

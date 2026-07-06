@@ -297,9 +297,9 @@ public:
             logger_->error(" queue_capacity must be > 32");
             ok = false;
         }
-        if (observation_mode < 1 || observation_mode > 3)
+        if (observation_mode < 0 || observation_mode > 3)
         {
-            logger_->error(" observation_mode must be 1, 2, or 3");
+            logger_->error(" observation_mode must be 0,1,2 or 3");
             ok = false;
         }
         return ok;

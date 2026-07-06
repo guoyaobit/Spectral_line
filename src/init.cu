@@ -6,8 +6,7 @@
 #include <complex>
 #include <thread>
 #include <omp.h>
-std::vector<std::unique_ptr<GpuPfbFft>> g_procspfbfft;
-std::vector<std::thread> g_threadspfbfft;
+#include <baseband.hpp>
 
 PacketBatch *allocatePacketBatch(size_t numpkts)
 {
@@ -55,6 +54,7 @@ void subband_thread(int subband_id,
     int shared_counter = 0;
     // 线程内部创建多个对象
     std::unique_ptr<GpuPfbFft> obj = std::make_unique<GpuPfbFft>(subband_id, pfbwin.data(), result);
+    std::unique_ptr<baseband> baseband_obj = std::make_unique<baseband>(subband_id);
     // for (size_t i = 0; i < num_objects; i++)
     // {
     //     objs.push_back(std::make_unique<GpuPfbFft>(subband_id, gpu_id, nfft, num_taps, pfbwin.data(),result,&shared_counter));
@@ -65,10 +65,16 @@ void subband_thread(int subband_id,
     {
         // for (auto &obj : objs)
         // {
-        obj->accumulate_one_block(); // CPU -> GPU 异步拷贝
-        obj->submit_PFB_FFT();       // PFB+ FFT
-        obj->StokesAcc();            // Stokes kernel
-        // }
+        if(cfg.observation_mode == 0) //baseband mode
+        {
+            baseband_obj->collectdata();
+        }
+        else if(cfg.observation_mode == 1) // spectrum line mode
+        {
+            obj->accumulate_one_block(); // CPU -> GPU 异步拷贝
+            obj->submit_PFB_FFT();       // PFB+ FFT
+            obj->StokesAcc();            // Stokes kernel
+        }
     }
 }
 

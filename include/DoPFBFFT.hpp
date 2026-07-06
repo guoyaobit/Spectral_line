@@ -614,7 +614,6 @@ public:
         // printf("got one block data on gpu");
         return true;
     }
-
     void submit_PFB_FFT()
     {
 
