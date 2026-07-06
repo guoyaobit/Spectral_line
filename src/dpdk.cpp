@@ -17,7 +17,7 @@
 #include <iostream>
 #include <vector>
 // #include <rings.hpp>
-#include "VDIF.hpp"
+#include "VDIFReader.hpp"
 #include "readerwriterqueue.h"
 #include "readerwritercircularbuffer.h"
 #include <chrono>
@@ -370,11 +370,12 @@ recv2mem(void *args)
     int tx_idx = 0;
     uint64_t total_lostnmber = 0;
     uint64_t total_pkts = 0;
-    uint32_t pre_NosieSoureState = 0xff;// magic number, means uninitialized state
+    uint32_t pre_NosieSoureState = 0xff; // magic number, means uninitialized state
     static auto start_time = std::chrono::steady_clock::now();
     static auto last_change_time = start_time;
     double duration;
     bool cal_vaild = false;
+    uint64_t prebatchid = 0;
     while (1)
     {
         int ret = rte_ring_dequeue(ring, (void **)&mbuf);
@@ -388,11 +389,18 @@ recv2mem(void *args)
         uint64_t m_frame_number = header.getFrameNumber();
         uint64_t m_timestamp = header.getTimestamp();
         uint32_t m_NosieSoureState = header.getNoiseSourceSate();
+        if (m_NosieSoureState != 0 && m_NosieSoureState != 1)
+        {
+            cfg.logger_->warn("Stream {}: Invalid Noise Source State: {}, m_seconds {}, m_frame_number {},m_timestamp:{}",
+                              stream_id, m_NosieSoureState, m_seconds, m_frame_number, m_timestamp);
+            // Invalid Noise Source State,drop packets
+            continue;
+        }
         if (cfg.cal_mode)
         {
             if (pre_NosieSoureState == 0xff)
                 pre_NosieSoureState = m_NosieSoureState;
-            if (pre_NosieSoureState != m_NosieSoureState)// state changed
+            if (pre_NosieSoureState != m_NosieSoureState) // state changed
             {
                 if (cfg.Debug_mode)
                 {
@@ -403,19 +411,24 @@ recv2mem(void *args)
                     last_change_time = now;
                     cfg.logger_->info("last state duration is {} s", duration);
                 }
-                if (!cal_vaild)// first state change, start to calculate
+                if (!cal_vaild) // first state change, start to calculate
                     cal_vaild = true;
             }
             if (!cal_vaild) // state not change, and first state not change, not start to calculate
-               {
+            {
                 rte_pktmbuf_free(mbuf);
                 continue;
-               }
+            }
         }
 
         // log_packet(logfile, m_seconds, m_frame_number);
         // fflush(logfile);
         uint64_t recv_packet_id = m_seconds * 62500ULL + m_frame_number;
+        uint batchsize = pool[0]->count;
+        // 计算当前包属于哪个 batch
+        uint64_t batchid = recv_packet_id / batchsize;
+        // 计算当前包在 batch 中的索引
+        pkt_idx_inbatch = recv_packet_id % batchsize;
         if (global_packet_id == 0)
         {
             // first received packet
@@ -423,6 +436,7 @@ recv2mem(void *args)
             // std::cout <<"First frameid is"<<global_packet_id<<std::endl;
             cfg.logger_->info("First packet_id is {} ,on stream {}", global_packet_id, stream_id);
             global_packet_id++;
+            prebatchid = batchid;
         }
         else
         {
@@ -506,44 +520,36 @@ recv2mem(void *args)
             }
             continue;
         }
-        PacketBatch *batch = pool[pool_idx];
-        uint batchsize = batch->pkts.size();
-
-        // Change: In one batch,recv_packet_id%batchsize keep from 0 to batchsize -1.
-        if (pkt_idx_inbatch != recv_packet_id % batchsize)
+        PacketBatch *batch = pool[pool_idx]; // 获取当前 batch
+        if (batchid != prebatchid)
         {
-            // TODO
-            // case 1 first pkt not equl 0.
-            // case 2 lost pkt
-            // case 3 : two steam not sync.
-            // check pktid in one batch is seque
-            // rte_pktmbuf_free(mbuf);
-            // continue;
+            while (prebatchid < batchid)
+            {
+                batch = pool[pool_idx]; // 获取当前 batch
+                // 将 batch 放入队列
+                if (!queue.try_enqueue(batch))
+                {
+                    cfg.logger_->error("Pktdata to Queue {} is full and overwrite", stream_id);
+                }
+                prebatchid++;
+                // 获取下一个 batch
+                pool_idx = (pool_idx + 1) % pool.size();                 // 循环使用 pool
+                batch = pool[pool_idx];                                  // 更新 batch 指针
+                memset(batch->buffer, 0, sizeof(Packet) * batch->count); // 清空 batch buffer
+                memset(batch->pkt_id.data(), 0, sizeof(uint) * batch->count);
+                memset(batch->noise_state.data(), 0, sizeof(uint8_t) * batch->count);
+                memset(batch->timestamps.data(), 0, sizeof(uint64_t) * batch->count);
+                memset(batch->pkt_vaild.data(), 0, sizeof(uint8_t) * batch->count);
+            }
         }
         Packet *pkt = batch->pkts[pkt_idx_inbatch];
         batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
         batch->noise_state[pkt_idx_inbatch] = m_NosieSoureState;
         batch->timestamps[pkt_idx_inbatch] = m_timestamp;
+        batch->pkt_vaild[pkt_idx_inbatch] = true; // mark pkt vaild
         // copy one packet data to struct
         rte_memcpy(pkt->payload, rte_pktmbuf_mtod(mbuf, uint8_t *) + 42 + 32, 8192);
         rte_pktmbuf_free(mbuf);
-        pkt_idx_inbatch++;
-
-        if (pkt_idx_inbatch >= batch->pkts.size())
-        {
-            // get one fft data，push to the queue
-            if (!queue.try_enqueue(batch))
-            {
-                // PacketBatch *trash;
-                // queue.try_dequeue(trash);
-                // queue.try_enqueue(batch);
-                cfg.logger_->error("Pktdata to Queue {} is full and overwrite", stream_id);
-            }
-            pkt_idx_inbatch = 0;
-            // 获取下一个 batch
-            pool_idx = (pool_idx + 1) % pool.size(); // 循环使用 pool
-            batch = pool[pool_idx];                  // 更新 batch 指针
-        }
     }
 }
 // 获取指定网卡的端口号
