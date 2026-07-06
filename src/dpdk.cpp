@@ -539,14 +539,12 @@ recv2mem(void *args)
                 memset(batch->pkt_id.data(), 0, sizeof(uint) * batch->count);
                 memset(batch->noise_state.data(), 0, sizeof(uint8_t) * batch->count);
                 memset(batch->timestamps.data(), 0, sizeof(uint64_t) * batch->count);
-                memset(batch->pkt_vaild.data(), 0, sizeof(uint8_t) * batch->count);
             }
         }
         Packet *pkt = batch->pkts[pkt_idx_inbatch];
         batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
         batch->noise_state[pkt_idx_inbatch] = m_NosieSoureState;
         batch->timestamps[pkt_idx_inbatch] = m_timestamp;
-        batch->pkt_vaild[pkt_idx_inbatch] = true; // mark pkt vaild
         // copy one packet data to struct
         rte_memcpy(pkt->payload, rte_pktmbuf_mtod(mbuf, uint8_t *) + 42 + 32, 8192);
         rte_pktmbuf_free(mbuf);

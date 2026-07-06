@@ -9,7 +9,7 @@
 #include <iostream>
 // #include <syncstream>
 #include <inttypes.h>
-#include <VDIF.hpp>
+#include <VDIFReader.hpp>
 #include <Globalcfg.hpp>
 #include <cuda_fp16.h>
 #include <fstream>
@@ -143,6 +143,7 @@ extern "C" __global__ void kernel_pfb_sum(
 
     output[p] = acc;
 }
+constexpr float scale = 1.0f / 127.0f;
 extern "C" __global__ void uint8_offsetIQ_to_ring(
     const uint8_t *__restrict__ src, // 移位二进制 I/Q
     complexf *__restrict__ gpuRing,  // 环形缓冲区
@@ -156,21 +157,13 @@ extern "C" __global__ void uint8_offsetIQ_to_ring(
     if (idx >= N)
         return;
 
-    // 读取移位二进制 I/Q
-    uint8_t u_re = src[2 * idx + 1];
-    uint8_t u_im = src[2 * idx];
-
-    // 转为 signed 并归一化 [-1,1]
-    float re = __int2float_rn(int(u_re) - 128) * (1.0f / 127.0f);
-    float im = __int2float_rn(int(u_im) - 128) * (1.0f / 127.0f);
-
-    complexf val;
-    val.x = re;
-    val.y = im;
-
-    // 写入环形缓冲区
+    const uchar2 *iq = reinterpret_cast<const uchar2 *>(src);
+    uchar2 s = iq[idx];
+    float re = __int2float_rn((int)s.y - 128) * scale;
+    float im = __int2float_rn((int)s.x - 128) * scale;
+    // 写入缓冲区
     size_t ring_idx = (head + idx) % W;
-    gpuRing[ring_idx] = val;
+    gpuRing[ring_idx] = make_float2(re, im);
 }
 __global__ void fftshift_1d(complexf *data, int N)
 {
@@ -360,7 +353,6 @@ public:
         m_hused.resize(NUM_SLOTS, false);
         m_timestamp.resize(NUM_SLOTS);
         acc_noise_state.resize(NUM_SLOTS);
-
         for (int i = 0; i < NUM_SLOTS; i++)
         {
             cudaMallocHost((void **)&m_hring[i], SLOT_SIZE); // pinned memory
@@ -415,18 +407,22 @@ public:
         {
             if (cudaEventQuery(m_hevents[idx]) == cudaSuccess && m_hused[idx])
             {
-                float max = 0;
-                int max_freq = 0;
-                for (int i = 0; i < m_Nfft; i++)
-                {
-                    if (m_hring[idx][i].x > max)
-                    {
-                        max = m_hring[idx][i].x;
-                        max_freq = i;
-                    }
-                }
+
                 if (cfg.Debug_mode)
+                {
+                    float max = 0;
+                    int max_freq = 0;
+                    for (int i = 0; i < m_Nfft; i++)
+                    {
+                        if (m_hring[idx][i].x > max)
+                        {
+                            max = m_hring[idx][i].x;
+                            max_freq = i;
+                        }
+                    }
                     printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
+                }
+
                 // std::cout << acc_noise_state[idx] << std::endl;
                 for (int i = 0; i < m_config->windows.size(); i++)
                 {
@@ -556,40 +552,58 @@ public:
         m_queueB->wait_dequeue(readblockB);
         // CUDA_CHECK(cudaStreamSynchronize(sH2DB));
         if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95)
-            cfg.logger_->debug("Buffed {} batch in queue", m_queueA->size_approx());
+            cfg.logger_->debug("Buffed {} batch in queue,more than 95%%", m_queueA->size_approx());
         // printf("Got dual block data on sub band %d", m_subband_id);
         // TODO GOT PKT ID FROM PKT
         size_t m_pktidA = readblockA->pkt_id[0];
         size_t m_pktidB = readblockB->pkt_id[0];
         if (cfg.Debug_mode)
         {
-            // if (m_pktidA != m_pktidB)
-            // cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
+            if (m_pktidA != m_pktidB)
+                cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
         }
-        if (cfg.cal_mode)
+        if (m_acc_id == m_acc_len / 2)
         {
-            auto m_noise_state = readblockA->noise_state[0];
-            cal_mode_unstable = false;
-            for (int i = 0; i < cfg.batchsize(); i++)
-            {
-                if (readblockA->noise_state[i] != m_noise_state or readblockB->noise_state[i] != m_noise_state)
-                {
-                    if (cfg.Debug_mode)
-                    {
-                        cfg.logger_->info("Got one batch data,while cal state changes");
-                    }
-                    cal_mode_unstable = true;
-                }
-            }
-            if (m_acc_id == cal_blank_len)
-                noise_state = readblockA->noise_state[0];
+            noise_state = readblockA->noise_state[0];
+            acc_noise_state[m_hhead] = noise_state;
         }
+        // if (cfg.cal_mode)
+        // {
+        // auto m_noise_state = readblockA->noise_state[0];
+        // cal_mode_unstable = false;
+        // for (int i = 0; i < cfg.batchsize(); i++)
+        // {
+        //     if (readblockA->noise_state[i] != m_noise_state or readblockB->noise_state[i] != m_noise_state)
+        //     {
+        //         if (cfg.Debug_mode)
+        //         {
+        //             cfg.logger_->info("Got one batch data,while cal state changes");
+        //         }
+        //         cal_mode_unstable = true;
+        //     }
+        // }
+        // if (m_acc_id == cal_blank_len)
+        //     noise_state = readblockA->noise_state[0];
+        // }
 
         // if (cal_mode_unstable)
         // {
         //     memset(readblockA->buffer, 0, cfg.batchsize() * sizeof(Packet));
         //     memset(readblockB->buffer, 0, cfg.batchsize() * sizeof(Packet));
         // }
+        for (int i = 0; i < cfg.batchsize(); i++)
+        {
+            if (readblockA->pkt_id[i] != m_pktidA + i)
+            {
+                cfg.logger_->warn("Subband {} pktid A not continuous. {} !={} ", m_subband_id, readblockA->pkt_id[i], m_pktidA + i);
+                memset(readblockA->buffer, 0, cfg.batchsize() * sizeof(Packet));
+            }
+            if (readblockB->pkt_id[i] != m_pktidB + i)
+            {
+                cfg.logger_->warn("Subband {} pktid B not continuous. {} !={} ", m_subband_id, readblockB->pkt_id[i], m_pktidB + i);
+                memset(readblockB->buffer, 0, cfg.batchsize() * sizeof(Packet));
+            }
+        }
         m_timestamp[m_hhead] = readblockA->timestamps[0];
         cudaMemcpyAsync(m_rawA, readblockA->buffer, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, sH2DA);
         cudaEventRecord(evtH2DA_done, sH2DA);
@@ -609,6 +623,7 @@ public:
         int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
         cudaStreamWaitEvent(sConvA, evtH2DA_done, 0);
+        // input: m_rawA, m_rawB output: m_d_inputA, m_d_inputB
         uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvA>>>(m_rawA, m_d_inputA, m_Nfft, m_in_head, m_input_ringsize);
         cudaEventRecord(evtConvA_done, sConvA);
         uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvB>>>(m_rawB, m_d_inputB, m_Nfft, m_in_head, m_input_ringsize);
@@ -661,25 +676,26 @@ public:
             if (m_acc_id < cal_blank_len or (m_acc_len - m_acc_id) < cal_blank_len)
             {
                 size_t device_pfbed_bytes = m_Nfft * sizeof(complexf);
-                cudaMemsetAsync(m_ffted_bufsA, 0, device_pfbed_bytes,sStokes);
-                cudaMemsetAsync(m_ffted_bufsB, 0, device_pfbed_bytes,sStokes);
+                cudaMemsetAsync(m_ffted_bufsA, 0, device_pfbed_bytes, sStokes);
+                cudaMemsetAsync(m_ffted_bufsB, 0, device_pfbed_bytes, sStokes);
             }
         }
         stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sStokes>>>(
             m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_IQUV);
 
-        (m_acc_id)++;
+        m_acc_id++;
         if (m_acc_id >= m_acc_len)
         {
             cudaEventRecord(evtStokes_done, sStokes);
-            // TODO gpu ring output
             cudaStreamWaitEvent(sD2H, evtStokes_done, 0);
             m_acc_id = 0;
+            if (m_hused[m_hhead])
+            {
+                cfg.logger_->warn("GPU ring buffer overflow, slot {} is still in use", m_hhead);
+            }
             cudaMemcpyAsync(m_hring[m_hhead], m_acc_stokes_IQUV, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
-            // cudaLaunchHostFunc(sD2H, GpuPfbFft::write_callback, this);
             cudaEventRecord(m_hevents[m_hhead], sD2H);
             m_hused[m_hhead] = true;
-            acc_noise_state[m_hhead] = noise_state;
             CUDA_CHECK(cudaMemsetAsync(m_acc_stokes_IQUV, 0, m_Nfft * sizeof(float4), sD2H));
             m_hhead = (m_hhead + 1) % NUM_SLOTS;
             acc_noise_state[m_hhead] = 0;

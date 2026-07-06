@@ -23,8 +23,8 @@ struct PacketBatch
 {
     int count;
     std::vector<uint> pkt_id;
-    std::vector<bool> noise_state;
-    bool vaild= true;
+    std::vector<uint8_t> noise_state;
+    bool vaild = true;
     std::vector<uint64_t> timestamps;
     Packet *buffer;             // 连续大 buffer
     std::vector<Packet *> pkts; // 一次 FFT 的数据包集合
@@ -103,7 +103,7 @@ public:
     bool Debug_mode = false;
     int recv_streams = 16;
     const int sampling_rate = 256e6; // samaping rate
-    std::string Storage_node_ip,Storage_node_mac,Sender_Nic;
+    std::string Storage_node_ip, Storage_node_mac, Sender_Nic;
     const int precision = 1 + 1;  // real 8bit ,image 8bit
     const int packet_size = 8192; // 每个数据包字节数
     int total_nfft = 65536;       // must be multipied by 4096
@@ -189,7 +189,7 @@ public:
                 observation_mode = config["observation_mode"].as<int>();
             if (config["integration_t"])
                 integration_t = config["integration_t"].as<double>();
-            if(config["cal_mode"])
+            if (config["cal_mode"])
                 cal_mode = config["cal_mode"].as<bool>();
             if (!config["subbands"] || !config["subbands"].IsSequence())
             {

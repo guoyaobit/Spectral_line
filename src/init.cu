@@ -9,9 +9,6 @@
 std::vector<std::unique_ptr<GpuPfbFft>> g_procspfbfft;
 std::vector<std::thread> g_threadspfbfft;
 
-// std::vector<std::unique_ptr<GpuStokes>> g_procstokes;
-// std::vector<std::thread> g_threadstokes;
-
 PacketBatch *allocatePacketBatch(size_t numpkts)
 {
     PacketBatch *batch = new PacketBatch;
@@ -44,15 +41,6 @@ void freeDataBatch(PacketBatch *batch)
     delete batch;
 }
 
-// void dopfb(std::unique_ptr<GpuPfbFft> proc)
-// {
-//     while (1)
-//     {
-//         proc->accumulate_one_block();
-//         proc->submit_PFB_FFT();
-//         proc->StokesAcc();
-//     }
-// }
 void subband_thread(int subband_id,
                     std::vector<float> pfbwin)
 {
