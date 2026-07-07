@@ -595,14 +595,17 @@ public:
         {
             if (readblockA->pkt_id[i] != m_pktidA + i)
             {
-                cfg.logger_->warn("Subband {} pktid A not continuous. {} !={} ", m_subband_id, readblockA->pkt_id[i], m_pktidA + i);
-                memset(readblockA->buffer, 0, cfg.batchsize() * sizeof(Packet));
+                readblockA->valid = false;
             }
             if (readblockB->pkt_id[i] != m_pktidB + i)
             {
-                cfg.logger_->warn("Subband {} pktid B not continuous. {} !={} ", m_subband_id, readblockB->pkt_id[i], m_pktidB + i);
-                memset(readblockB->buffer, 0, cfg.batchsize() * sizeof(Packet));
+                readblockB->valid = false;
             }
+        }
+        if (readblockA->valid == false or readblockB->valid == false)
+        {
+            memset(readblockA->buffer, 0, cfg.batchsize() * sizeof(Packet));
+            memset(readblockB->buffer, 0, cfg.batchsize() * sizeof(Packet));
         }
         m_timestamp[m_hhead] = readblockA->timestamps[0];
         cudaMemcpyAsync(m_rawA, readblockA->buffer, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, sH2DA);

@@ -144,6 +144,10 @@ int init()
     size_t num_taps = 4;
     std::vector<float> pfbwin(num_taps * Nfft);
     genPfbWin(pfbwin, num_taps * Nfft, num_taps);
+    if(cfg.observation_mode == 0)
+    {
+        cfg.logger_->info("Baseband mode, no PFB window generated");
+    }
     // init subband thread
     for (size_t i = 0; i < cfg.subbands.size(); i++)
     {

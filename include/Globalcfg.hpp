@@ -15,6 +15,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <iomanip>
 #include <SpectrumSender.hpp>
+#include <filesystem>
 struct Packet
 {
     uint8_t payload[8192]; // 4096*(Re + Im)
@@ -24,7 +25,7 @@ struct PacketBatch
     int count;
     std::vector<uint> pkt_id;
     std::vector<uint8_t> noise_state;
-    bool vaild = true;
+    bool valid = true;
     std::vector<uint64_t> timestamps;
     Packet *buffer;             // 连续大 buffer
     std::vector<Packet *> pkts; // 一次 FFT 的数据包集合
@@ -113,6 +114,8 @@ public:
     double integration_t = 1;
     int observation_mode = 1; // 默认单窗口分子谱线模式
     bool cal_mode = false;
+    std::string Baseband_folder0;
+    std::string Baseband_folder1;
 
     // how many packet in one batch
     int batchsize() const { return total_nfft / 4096; }
@@ -145,7 +148,8 @@ public:
                 Debug_mode = config["Debug"].as<bool>();
             if (config["recv_streams"])
                 recv_streams = config["recv_streams"].as<int>();
-
+            if (config["observation_mode"])
+                observation_mode = config["observation_mode"].as<int>();
             if (config["Storage_node_ip"] && config["Storage_node_ip"].IsScalar())
             {
                 Storage_node_ip = config["Storage_node_ip"].as<std::string>();
@@ -170,10 +174,36 @@ public:
             {
                 throw std::runtime_error("配置文件缺少 Sender_Nic!");
             }
-
+            if(observation_mode == 0)
+            { 
+                if (config["Baseband_Folder0"] && config["Baseband_Folder0"].IsScalar())
+                {
+                    Baseband_folder0 = config["Baseband_Folder0"].as<std::string>();
+                }
+                else
+                {
+                    throw std::runtime_error("配置文件缺少 Baseband_Folder0!");
+                }
+                if (config["Baseband_Folder1"] && config["Baseband_Folder1"].IsScalar())
+                {
+                    Baseband_folder1 = config["Baseband_Folder1"].as<std::string>();
+                }
+                else
+                {
+                    throw std::runtime_error("配置文件缺少 Baseband_Folder1!");
+                }
+                
+                namespace fs = std::filesystem;
+                auto now = std::chrono::system_clock::to_time_t(
+                    std::chrono::system_clock::now());
+                
+                cfg.Baseband_folder0 = cfg.Baseband_folder0 + "/" + std::to_string(now);
+                fs::create_directories(cfg.Baseband_folder0);
+                cfg.Baseband_folder1 = cfg.Baseband_folder1 + "/" + std::to_string(now);
+                fs::create_directories(cfg.Baseband_folder1);
+            }
             if (config["win_bw"])
                 win_bw = config["win_bw"].as<float>();
-
             // std::cout<< win_bw<<std::endl;
             if (config["win_channels"])
                 win_channels = config["win_channels"].as<int>();
@@ -185,8 +215,7 @@ public:
 
             if (config["queue_capacity"])
                 QUEUE_CAPACITY = config["queue_capacity"].as<std::size_t>();
-            if (config["observation_mode"])
-                observation_mode = config["observation_mode"].as<int>();
+
             if (config["integration_t"])
                 integration_t = config["integration_t"].as<double>();
             if (config["cal_mode"])

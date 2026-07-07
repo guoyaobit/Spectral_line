@@ -539,6 +539,7 @@ recv2mem(void *args)
                 memset(batch->pkt_id.data(), 0, sizeof(uint) * batch->count);
                 memset(batch->noise_state.data(), 0, sizeof(uint8_t) * batch->count);
                 memset(batch->timestamps.data(), 0, sizeof(uint64_t) * batch->count);
+                batch->valid = true; // 重置 batch 的有效性
             }
         }
         Packet *pkt = batch->pkts[pkt_idx_inbatch];
