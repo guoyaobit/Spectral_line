@@ -1,7 +1,7 @@
 # recv_streams: 16 
 # total_nfft: 16777216 # Nfft or Fre channels
 Debug: true
-queue_capacity: 16384
+# queue_capacity: 16384
 observation_mode: 1      # 观测模式 0 : baseband 1: spcetrum
 cal_mode: true
 # blanking  time 10ms before and after

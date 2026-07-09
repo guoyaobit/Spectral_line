@@ -68,6 +68,7 @@ private:
         std::filesystem::path folder(m_folder);
         std::error_code ec;
         std::filesystem::create_directories(folder, ec);
+        auto &cfg = GlobalConfig::getInstance();
         if (ec)
         {
             auto &cfg = GlobalConfig::getInstance();
@@ -215,8 +216,6 @@ baseband::baseband(int sub_band_id)
     {
         // best-effort logging; constructor cannot throw per your preference
         cfg.logger_->error("baseband: initial create_file failed for subband {}", m_subband_id);
-        // decide: keep fd=-1 and let collectdata handle later, or abort process:
-        // cfg.logger_->critical("baseband: aborting due to initial file creation failure"); std::abort();
     }
 }
 

@@ -53,28 +53,31 @@ void subband_thread(int subband_id,
     cudaMemset(result, 0, cfg.total_nfft * sizeof(float4));
     int shared_counter = 0;
     // 线程内部创建多个对象
-    std::unique_ptr<GpuPfbFft> obj = std::make_unique<GpuPfbFft>(subband_id, pfbwin.data(), result);
-    std::unique_ptr<baseband> baseband_obj = std::make_unique<baseband>(subband_id);
-    // for (size_t i = 0; i < num_objects; i++)
-    // {
-    //     objs.push_back(std::make_unique<GpuPfbFft>(subband_id, gpu_id, nfft, num_taps, pfbwin.data(),result,&shared_counter));
-    // }
-
-    // 循环处理流水线
-    while (true)
+    
+    if(cfg.observation_mode == 0) // baseband mode
     {
-        // for (auto &obj : objs)
-        // {
-        if(cfg.observation_mode == 0) //baseband mode
+        cfg.logger_->info("subband {}: baseband mode, no PFB window generated", subband_id);
+        std::unique_ptr<baseband> baseband_obj = std::make_unique<baseband>(subband_id);
+        while (true)
         {
             baseband_obj->collectdata();
         }
-        else if(cfg.observation_mode == 1) // spectrum line mode
+    }
+    else if (cfg.observation_mode == 1) // spectrum line mode
+    {
+        cfg.logger_->info("subband {}: spectrum line mode, PFB window generated", subband_id);
+        std::unique_ptr<GpuPfbFft> obj = std::make_unique<GpuPfbFft>(subband_id, pfbwin.data(), result);
+        while (true)
         {
             obj->accumulate_one_block(); // CPU -> GPU 异步拷贝
             obj->submit_PFB_FFT();       // PFB+ FFT
             obj->StokesAcc();            // Stokes kernel
         }
+    }
+    else
+    {
+        cfg.logger_->error("subband {}: unknown observation mode {}", subband_id, cfg.observation_mode);
+        return;
     }
 }
 
@@ -111,30 +114,40 @@ void genPfbWin(std::vector<float> &win, int N, int P)
         win[i] /= sum;
     }
 }
+size_t calc_pool_size()
+{
+    constexpr uint64_t MAX_POOL_MEMORY = 1ULL * 1024 * 1024 * 1024; // 4 GiB
+    auto &cfg = GlobalConfig::getInstance();
+    size_t batch_bytes =
+        cfg.recv_streams*sizeof(Packet) * cfg.batchsize();
+
+    size_t pool_size =
+        MAX_POOL_MEMORY / batch_bytes;
+    return std::max<size_t>(pool_size, 2);
+}
 int init()
 {
     auto &cfg = GlobalConfig::getInstance();
-
-    int queue_capacity = cfg.QUEUE_CAPACITY;
+    cfg.QUEUE_CAPACITY = calc_pool_size();
+    cfg.logger_->info("QUEUE_CAPACITY = {}", cfg.QUEUE_CAPACITY);
+    // printf("QUEUE_CAPACITY = %zu\n", cfg.QUEUE_CAPACITY);
     // two polar in one subband
     cfg.g_in_queues.reserve(cfg.recv_streams);
     for (size_t s = 0; s < cfg.recv_streams; s++)
     {
-        cfg.g_in_queues.emplace_back(queue_capacity);
+        cfg.g_in_queues.emplace_back(cfg.QUEUE_CAPACITY);
     }
     cfg.g_in_pools.resize(cfg.recv_streams);
     if (cfg.total_nfft % 4096 != 0)
         cfg.logger_->error("total_nfft must be multiplied by 4096!");
-
-    int pool_size = cfg.QUEUE_CAPACITY;
     int batchsize = cfg.batchsize();
     cfg.logger_->debug(
-        "Allocating pinned memory {} MiB", cfg.recv_streams * pool_size * sizeof(Packet) * batchsize / 1e6);
+        "Allocating pinned memory {} MiB", cfg.recv_streams * cfg.QUEUE_CAPACITY * sizeof(Packet) * batchsize / 1e6);
     for (size_t s = 0; s < cfg.recv_streams; ++s)
     {
-        cfg.g_in_pools[s].resize(pool_size);
+        cfg.g_in_pools[s].resize(cfg.QUEUE_CAPACITY);
         
-        for (size_t b = 0; b < pool_size; ++b)
+        for (size_t b = 0; b < cfg.QUEUE_CAPACITY; ++b)
         {
             cfg.g_in_pools[s][b] = allocatePacketBatch(batchsize);
         }
@@ -144,10 +157,6 @@ int init()
     size_t num_taps = 4;
     std::vector<float> pfbwin(num_taps * Nfft);
     genPfbWin(pfbwin, num_taps * Nfft, num_taps);
-    if(cfg.observation_mode == 0)
-    {
-        cfg.logger_->info("Baseband mode, no PFB window generated");
-    }
     // init subband thread
     for (size_t i = 0; i < cfg.subbands.size(); i++)
     {

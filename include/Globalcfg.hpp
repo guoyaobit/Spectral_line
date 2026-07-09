@@ -116,7 +116,7 @@ public:
     std::string Baseband_folder0;
     std::string Baseband_folder1;
 
-    // how many packet in one batch
+    // how many packet in one batch(FFT period)
     int batchsize() const { return total_nfft / 4096; }
     // 每次 FFT 的时间长度
     double fft_period() const
@@ -222,9 +222,6 @@ public:
 
             // printf("%d\n", total_nfft);
 
-            if (config["queue_capacity"])
-                QUEUE_CAPACITY = config["queue_capacity"].as<std::size_t>();
-
             if (config["integration_t"])
                 integration_t = config["integration_t"].as<double>();
             if (config["cal_mode"])
@@ -327,12 +324,6 @@ public:
         if (total_nfft < 65536)
         {
             logger_->error(" win_channels* 256e6/bw must >= 65536 {}", win_channels);
-            ok = false;
-        }
-
-        if (QUEUE_CAPACITY < 64)
-        {
-            logger_->error(" queue_capacity must be > 32");
             ok = false;
         }
         if (observation_mode < 0 || observation_mode > 3)
