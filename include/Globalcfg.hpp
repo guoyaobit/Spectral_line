@@ -9,8 +9,6 @@
 #include <iostream>
 #include "spdlog/spdlog.h"
 #include "spdlog/async.h"
-// #include "spdlog/sinks/daily_file_sink.h"
-// #include <spdlog/stopwatch.h>
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include <spdlog/sinks/basic_file_sink.h>
 #include <iomanip>
@@ -24,6 +22,7 @@ struct PacketBatch
 {
     int count;
     std::vector<uint> pkt_id;
+    std::vector<u_int8_t> epoch;
     std::vector<uint8_t> noise_state;
     bool valid = true;
     std::vector<uint64_t> timestamps;
@@ -174,8 +173,8 @@ public:
             {
                 throw std::runtime_error("配置文件缺少 Sender_Nic!");
             }
-            if(observation_mode == 0)
-            { 
+            if (observation_mode == 0)
+            {
                 if (config["Baseband_Folder0"] && config["Baseband_Folder0"].IsScalar())
                 {
                     Baseband_folder0 = config["Baseband_Folder0"].as<std::string>();
@@ -192,15 +191,25 @@ public:
                 {
                     throw std::runtime_error("配置文件缺少 Baseband_Folder1!");
                 }
-                
+
                 namespace fs = std::filesystem;
+
                 auto now = std::chrono::system_clock::to_time_t(
                     std::chrono::system_clock::now());
-                
-                cfg.Baseband_folder0 = cfg.Baseband_folder0 + "/" + std::to_string(now);
-                fs::create_directories(cfg.Baseband_folder0);
-                cfg.Baseband_folder1 = cfg.Baseband_folder1 + "/" + std::to_string(now);
-                fs::create_directories(cfg.Baseband_folder1);
+
+                std::tm tm;
+                localtime_r(&now, &tm);
+
+                std::ostringstream oss;
+                oss << std::put_time(&tm, "%Y%m%d_%H%M%S");
+
+                std::string datetime = oss.str();
+
+                Baseband_folder0 = Baseband_folder0 + "/" + datetime;
+                fs::create_directories(Baseband_folder0);
+
+                Baseband_folder1 = Baseband_folder1 + "/" + datetime;
+                fs::create_directories(Baseband_folder1);
             }
             if (config["win_bw"])
                 win_bw = config["win_bw"].as<float>();
