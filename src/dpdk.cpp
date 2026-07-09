@@ -284,7 +284,7 @@ lcore_recv(void *arg)
     auto &cfg = GlobalConfig::getInstance();
     size_t pool_idx = 0;
     // int static_dstport = port_list[queue_id];
-    // uint64_t global_packet_id = 0;
+    // uint64_t expected_pkt_id = 0;
     // int presecond = -1;
     // int batch_idx = 0;
     // int pkt_idx_inbatch = 0;
@@ -364,7 +364,7 @@ recv2mem(void *args)
     // sprintf(buf, "sub_bands_%d.csv", param->queue_id);
     // logfile = init_log_append(buf);
     cfg.logger_->debug("Running recv2mem thread: stream id :{},core id: {}", stream_id, rte_lcore_id());
-    uint64_t global_packet_id = 0;
+    uint64_t expected_pkt_id = 0;
     cfg.logger_->debug("Batchsize is {}", pool[0]->pkts.size());
     struct rte_mbuf *bufs[BURST_SIZE];
     int tx_idx = 0;
@@ -429,24 +429,24 @@ recv2mem(void *args)
         uint64_t batchid = recv_packet_id / batchsize;
         // 计算当前包在 batch 中的索引
         pkt_idx_inbatch = recv_packet_id % batchsize;
-        if (global_packet_id == 0)
+        if (expected_pkt_id == 0)
         {
             // first received packet
-            global_packet_id = recv_packet_id;
-            // std::cout <<"First frameid is"<<global_packet_id<<std::endl;
-            cfg.logger_->info("First packet_id is {} ,on stream {}", global_packet_id, stream_id);
-            global_packet_id++;
+            expected_pkt_id = recv_packet_id;
+            // std::cout <<"First frameid is"<<expected_pkt_id<<std::endl;
+            cfg.logger_->info("First packet_id is {} ,on stream {}", expected_pkt_id, stream_id);
+            expected_pkt_id++;
             prebatchid = batchid;
         }
         else
         {
-            if (global_packet_id != recv_packet_id)
+            if (expected_pkt_id != recv_packet_id)
             {
-                uint64_t lostnmber = recv_packet_id - global_packet_id;
+                uint64_t lostnmber = recv_packet_id - expected_pkt_id;
                 total_lostnmber += lostnmber;
-                cfg.logger_->warn("Stream {}:total_lostnmber {},m_seconds {}, m_frame_number {},recv_packet_id:{} , global_packet_id: {} ,lost {} packets",
-                                  stream_id, total_lostnmber, m_seconds, m_frame_number, recv_packet_id, global_packet_id, lostnmber);
-                global_packet_id = recv_packet_id + 1;
+                cfg.logger_->warn("Stream {}:total_lostnmber {},m_seconds {}, m_frame_number {},recv_packet_id:{} , expected_pkt_id: {} ,lost {} packets",
+                                  stream_id, total_lostnmber, m_seconds, m_frame_number, recv_packet_id, expected_pkt_id, lostnmber);
+                expected_pkt_id = recv_packet_id + 1;
                 double loss_rate = static_cast<double>(total_lostnmber) / (total_lostnmber + total_pkts);
                 if (cfg.Debug_mode)
                 {
@@ -468,7 +468,7 @@ recv2mem(void *args)
             }
             else
             {
-                global_packet_id++;
+                expected_pkt_id++;
             }
         }
 

@@ -116,7 +116,7 @@ void genPfbWin(std::vector<float> &win, int N, int P)
 }
 size_t calc_pool_size()
 {
-    constexpr uint64_t MAX_POOL_MEMORY = 1ULL * 1024 * 1024 * 1024; // 4 GiB
+    constexpr uint64_t MAX_POOL_MEMORY = 64ULL * 1024 * 1024 * 1024; // 4 GiB
     auto &cfg = GlobalConfig::getInstance();
     size_t batch_bytes =
         cfg.recv_streams*sizeof(Packet) * cfg.batchsize();
