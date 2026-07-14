@@ -50,6 +50,7 @@ struct WindowConfig
 };
 struct SubbandConfig
 {
+    bool enable = true;
     int gpu_id;
     float start_freq;
     float end_freq;

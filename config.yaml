@@ -24,6 +24,7 @@ subbands:
   #  subband 0
 
   - gpu_id: 0
+    enable: true
     start_freq: 384e6
     end_freq: 640e6
     port : 60000
@@ -35,6 +36,7 @@ subbands:
   
   # recv port from FPGA is  60002,60003
   - gpu_id: 0
+    enable: true
     start_freq: 640e6
     end_freq: 896e6
     port : 60001
@@ -45,6 +47,7 @@ subbands:
     # - center_freq: 2503e6
 
   - gpu_id: 1
+    enable: true
     start_freq: 896e6
     end_freq: 1152e6
     port: 60002
@@ -52,6 +55,7 @@ subbands:
     - center_freq: 1024e6
 
   - gpu_id: 1
+    enable: true
     start_freq: 1152e6
     end_freq: 1408e6  
     port: 60003

@@ -45,8 +45,11 @@ void subband_thread(int subband_id,
 {
     float4 *result;
     auto &cfg = GlobalConfig::getInstance();
-    
-
+    if(cfg.subbands[subband_id]->enable == false)
+    {
+        cfg.logger_->info("subband {}: disabled, thread exit", subband_id);
+        return;
+    }
     cudaSetDevice(cfg.subbands[subband_id]->gpu_id);
 
     cudaMalloc((void **)&result, cfg.total_nfft * sizeof(float4)); //
