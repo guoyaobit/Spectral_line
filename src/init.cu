@@ -127,8 +127,9 @@ void subband_thread(int subband_id)
 
 size_t calc_pool_size()
 {
-    constexpr uint64_t MAX_POOL_MEMORY = 64ULL * 1024 * 1024 * 1024; //
+    
     auto &cfg = GlobalConfig::getInstance();
+    uint64_t MAX_POOL_MEMORY = cfg.Memory_pool_size* 1024ULL * 1024ULL * 1024ULL;
     size_t batch_bytes =
         cfg.max_streams*sizeof(Packet) * cfg.batchsize();
 
@@ -140,7 +141,7 @@ int init()
 {
     auto &cfg = GlobalConfig::getInstance();
     cfg.QUEUE_CAPACITY = calc_pool_size();
-    // cfg.logger_->info("QUEUE_CAPACITY = {}", cfg.QUEUE_CAPACITY);
+    cfg.logger_->info("QUEUE_CAPACITY = {}", cfg.QUEUE_CAPACITY);
     // printf("QUEUE_CAPACITY = %zu\n", cfg.QUEUE_CAPACITY);
     // two polar in one subband
     cfg.stream_queues.reserve(cfg.max_streams);

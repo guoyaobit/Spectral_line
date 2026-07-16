@@ -1,6 +1,7 @@
 # recv_streams: 16 
 # total_nfft: 16777216 # Nfft or Fre channels
 Debug: true
+Memory_pool_size: 64 # GB
 observation_mode: 1      # 观测模式 0 : baseband 1: spcetrum
 cal_mode: true
 # blanking  time 10ms before and after

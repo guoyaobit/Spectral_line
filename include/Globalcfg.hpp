@@ -136,6 +136,7 @@ public:
         return N * fft_period();
     }
     // input queques
+    size_t Memory_pool_size = 64;    // GB
     std::size_t QUEUE_CAPACITY = 64; // key value about memory usage
     std::vector<moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *>> stream_queues;
     std::vector<std::vector<PacketBatch *>> stream_pools;
@@ -148,6 +149,8 @@ public:
             YAML::Node config = YAML::LoadFile(filename);
             if (config["Debug"])
                 Debug_mode = config["Debug"].as<bool>();
+            if (config["Memory_pool_size"])
+                Memory_pool_size = config["Memory_pool_size"].as<size_t>(); // GB
             if (config["observation_mode"])
                 observation_mode = config["observation_mode"].as<int>();
             if (config["Storage_node_ip"] && config["Storage_node_ip"].IsScalar())
