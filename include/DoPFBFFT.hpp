@@ -212,9 +212,11 @@ public:
 
         m_gpu_id = m_config->gpu_id;
         m_Nfft = cfg.total_nfft;
-        m_queueA = &cfg.stream_queues[m_subband_id * 2];
+        // m_queueA = &cfg.stream_queues[m_subband_id * 2];
+        // m_queueB = &cfg.stream_queues[m_subband_id * 2 + 1];
+        m_queueA = &cfg.streams[m_subband_id * 2].queue;
+        m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
 
-        m_queueB = &cfg.stream_queues[m_subband_id * 2 + 1];
         m_packets_per_block = m_Nfft / SAMPLES_PER_PACKET;
         m_packets_per_frame = m_num_taps * m_packets_per_block;
         // printf("%d,%d",m_packets_per_block*SAMPLES_PER_PACKET,m_packets_per_frame*SAMPLES_PER_PACKET);

@@ -103,8 +103,8 @@ public:
     }
     // default para
     bool Debug_mode = false;
-    uint8_t recv_streams = 0;
     uint8_t max_streams = 16;        // 最大接收流数
+    uint8_t enabled_streams = 0; // 实际启用的接收流数
     const int sampling_rate = 256e6; // samaping rate
     std::string Storage_node_ip, Storage_node_mac, Sender_Nic;
     const int precision = 1 + 1;  // real 8bit ,image 8bit
@@ -136,11 +136,30 @@ public:
         return N * fft_period();
     }
     // input queques
-    size_t Memory_pool_size = 64;    // GB
+    size_t Memory_pool_per_stream = 64; // GB
+    Packet *packet_pool = nullptr;
     std::size_t QUEUE_CAPACITY = 64; // key value about memory usage
-    std::vector<moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *>> stream_queues;
-    std::vector<std::vector<PacketBatch *>> stream_pools;
+    // std::vector<moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *>> stream_queues;
+    // std::vector<std::vector<PacketBatch *>> stream_pools;
     std::vector<SubbandConfig *> subbands;
+    struct StreamContext
+    {
+        bool enable = false;
+
+        int subband_id = -1;
+
+        int pool_index = -1;
+
+        moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> queue;
+
+        std::vector<PacketBatch *> pool;
+
+        StreamContext(size_t queue_capacity)
+            : queue(queue_capacity)
+        {
+        }
+    };
+    std::vector<StreamContext> streams;
     // 初始化 YAML 配置
     bool initFromYaml(const std::string &filename)
     {
@@ -149,8 +168,8 @@ public:
             YAML::Node config = YAML::LoadFile(filename);
             if (config["Debug"])
                 Debug_mode = config["Debug"].as<bool>();
-            if (config["Memory_pool_size"])
-                Memory_pool_size = config["Memory_pool_size"].as<size_t>(); // GB
+            if (config["Memory_pool_per_stream"])
+                Memory_pool_per_stream = config["Memory_pool_per_stream"].as<size_t>(); // GB
             if (config["observation_mode"])
                 observation_mode = config["observation_mode"].as<int>();
             if (config["Storage_node_ip"] && config["Storage_node_ip"].IsScalar())
@@ -248,7 +267,6 @@ public:
                     subbands.push_back(sb);
                     continue;
                 }
-                recv_streams += 2; // 每个子频段增加两个接收流
                 sb->gpu_id = sbNode["gpu_id"].as<int>();
                 sb->start_freq = sbNode["start_freq"].as<float>();
                 sb->end_freq = sbNode["end_freq"].as<float>();
@@ -318,11 +336,6 @@ public:
     bool checkConfig() const
     {
         bool ok = true;
-        if (recv_streams <= 0)
-        {
-            logger_->error(" recv_streams must be > 0");
-            ok = false;
-        }
 
         if (win_channels <= 0)
         {

@@ -289,8 +289,8 @@ recv2mem(void *args)
     int stream_id = param->ring_id;
     rte_ring *ring = rx_rings[param->ring_id];
     rte_mbuf *mbuf;
-    auto &queue = cfg.stream_queues[stream_id];
-    auto &pool = cfg.stream_pools[stream_id];
+    auto &queue = cfg.streams[stream_id].queue;
+    auto &pool = cfg.streams[stream_id].pool;
     size_t pool_idx = 0, pkt_idx_inbatch = 0;
     // FILE *logfile = nullptr;
     // char buf[64];

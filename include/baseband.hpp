@@ -105,7 +105,6 @@ public:
         auto &cfg = GlobalConfig::getInstance();
         PacketBatch *readblockA = nullptr;
         PacketBatch *readblockB = nullptr;
-
         m_queueA->wait_dequeue(readblockA);
         m_queueB->wait_dequeue(readblockB);
 
@@ -184,13 +183,13 @@ public:
             header.setThread(m_subband_id * 2);
             if (write_all(fd, header.data(), HEADER_SIZE) != 0)
                 return;
-            if (write_all(fd, readblockA->pkts[i], FRAME_PAYLOAD) != 0)
+            if (write_all(fd, &readblockA->buffer[i], FRAME_PAYLOAD) != 0)
                 return;
 
             header.setThread(m_subband_id * 2 + 1);
             if (write_all(fd, header.data(), HEADER_SIZE) != 0)
                 return;
-            if (write_all(fd, readblockB->pkts[i], FRAME_PAYLOAD) != 0)
+            if (write_all(fd, &readblockB->buffer[i], FRAME_PAYLOAD) != 0)
                 return;
         }
 
@@ -204,9 +203,10 @@ baseband::baseband(int sub_band_id)
     : m_subband_id(sub_band_id)
 {
     auto &cfg = GlobalConfig::getInstance();
-    m_queueA = &cfg.stream_queues[m_subband_id * 2];
-    m_queueB = &cfg.stream_queues[m_subband_id * 2 + 1];
-
+    // m_queueA = &cfg.stream_queues[m_subband_id * 2];
+    // m_queueB = &cfg.stream_queues[m_subband_id * 2 + 1];
+    m_queueA = &cfg.streams[m_subband_id * 2].queue;
+    m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
     if (m_subband_id < 4)
         m_folder = cfg.Baseband_folder0;
     else
