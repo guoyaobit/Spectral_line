@@ -29,7 +29,6 @@ int main()
     if(cfg.observation_mode == 0|| cfg.observation_mode == 2)
     {
         cfg.total_nfft = 65536;
-        cfg.QUEUE_CAPACITY = 16384;
     }
     // init memory
     init();

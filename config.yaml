@@ -1,8 +1,7 @@
 # recv_streams: 16 
 # total_nfft: 16777216 # Nfft or Fre channels
 Debug: true
-# queue_capacity: 16384
-observation_mode: 0      # 观测模式 0 : baseband 1: spcetrum
+observation_mode: 1      # 观测模式 0 : baseband 1: spcetrum
 cal_mode: true
 # blanking  time 10ms before and after
 # cal_on_t: 5 # on time
@@ -63,19 +62,23 @@ subbands:
     windows: 
     - center_freq: 1280e6
   
-  # - gpu_id: 2
-  #   start_freq: 0
-  #   end_freq: 256e6
+  - gpu_id: 2
+    enable: false
+    start_freq: 0
+    end_freq: 256e6
 
-  # - gpu_id: 2
-  #   start_freq: 0
-  #   end_freq: 256e6
+  - gpu_id: 2
+    enable: false
+    start_freq: 0
+    end_freq: 256e6
 
-  # - gpu_id: 3
-  #   start_freq: 0
-  #   end_freq: 256e6
+  - gpu_id: 3
+    enable: false
+    start_freq: 0
+    end_freq: 256e6
 
-  # - gpu_id: 3
-  #   start_freq: 0
-  #   end_freq: 256e6  
+  - gpu_id: 3
+    enable: false
+    start_freq: 0
+    end_freq: 256e6  
 

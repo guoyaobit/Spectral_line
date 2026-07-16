@@ -50,6 +50,7 @@ struct WindowConfig
 };
 struct SubbandConfig
 {
+    u_int8_t subband_id;
     bool enable = true;
     int gpu_id;
     float start_freq;
@@ -102,7 +103,8 @@ public:
     }
     // default para
     bool Debug_mode = false;
-    int recv_streams = 16;
+    uint8_t recv_streams = 0;
+    uint8_t max_streams = 16;        // 最大接收流数
     const int sampling_rate = 256e6; // samaping rate
     std::string Storage_node_ip, Storage_node_mac, Sender_Nic;
     const int precision = 1 + 1;  // real 8bit ,image 8bit
@@ -135,8 +137,8 @@ public:
     }
     // input queques
     std::size_t QUEUE_CAPACITY = 64; // key value about memory usage
-    std::vector<moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *>> g_in_queues;
-    std::vector<std::vector<PacketBatch *>> g_in_pools;
+    std::vector<moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *>> stream_queues;
+    std::vector<std::vector<PacketBatch *>> stream_pools;
     std::vector<SubbandConfig *> subbands;
     // 初始化 YAML 配置
     bool initFromYaml(const std::string &filename)
@@ -146,8 +148,6 @@ public:
             YAML::Node config = YAML::LoadFile(filename);
             if (config["Debug"])
                 Debug_mode = config["Debug"].as<bool>();
-            if (config["recv_streams"])
-                recv_streams = config["recv_streams"].as<int>();
             if (config["observation_mode"])
                 observation_mode = config["observation_mode"].as<int>();
             if (config["Storage_node_ip"] && config["Storage_node_ip"].IsScalar())
@@ -234,12 +234,19 @@ public:
                 throw std::runtime_error("配置文件缺少 subbands config!");
             }
             // int send_start_port = 60000;
+            int subband_id = 0;
             for (const auto &sbNode : config["subbands"])
             {
                 SubbandConfig *sb = new SubbandConfig();
+                sb->subband_id = subband_id++;
+                sb->enable = sbNode["enable"].as<bool>();
+                if (!sb->enable)
+                {
+                    subbands.push_back(sb);
+                    continue;
+                }
+                recv_streams += 2; // 每个子频段增加两个接收流
                 sb->gpu_id = sbNode["gpu_id"].as<int>();
-                // sb->A_port = sbNode["A_port"].as<int>();
-                // sb->B_port = sbNode["B_port"].as<int>();
                 sb->start_freq = sbNode["start_freq"].as<float>();
                 sb->end_freq = sbNode["end_freq"].as<float>();
                 sb->port = sbNode["port"].as<int>();

@@ -204,8 +204,8 @@ baseband::baseband(int sub_band_id)
     : m_subband_id(sub_band_id)
 {
     auto &cfg = GlobalConfig::getInstance();
-    m_queueA = &cfg.g_in_queues[m_subband_id * 2];
-    m_queueB = &cfg.g_in_queues[m_subband_id * 2 + 1];
+    m_queueA = &cfg.stream_queues[m_subband_id * 2];
+    m_queueB = &cfg.stream_queues[m_subband_id * 2 + 1];
 
     if (m_subband_id < 4)
         m_folder = cfg.Baseband_folder0;
