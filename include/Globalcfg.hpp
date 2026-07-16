@@ -14,6 +14,10 @@
 #include <iomanip>
 #include <SpectrumSender.hpp>
 #include <filesystem>
+#include <condition_variable>
+#include <mutex>
+
+
 struct Packet
 {
     uint8_t payload[8192]; // 4096*(Re + Im)
@@ -70,6 +74,11 @@ public:
     GlobalConfig(const GlobalConfig &) = delete;
     GlobalConfig &operator=(const GlobalConfig &) = delete;
     std::shared_ptr<spdlog::logger> logger_;
+    std::mutex init_mutex;
+    std::condition_variable init_cv;
+
+    size_t ready_threads = 0;
+    size_t total_threads = 0;
     void initlog()
     {
         // 生成带时间戳的日志文件名

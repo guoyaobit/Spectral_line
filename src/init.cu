@@ -57,8 +57,13 @@ void subband_thread(int subband_id) {
   float4 *result;
   auto &cfg = GlobalConfig::getInstance();
   cudaSetDevice(cfg.subbands[subband_id]->gpu_id);
-  // 线程内部创建多个对象
-
+  {
+    std::lock_guard<std::mutex> lock(cfg.init_mutex);
+    cfg.ready_threads++;
+  }
+  cfg.init_cv.notify_all();
+  cfg.logger_->info("subband {} ready {}/{}", subband_id, cfg.ready_threads,
+                    cfg.total_threads);
   if (cfg.observation_mode == 0) // baseband mode
   {
     cfg.logger_->info("subband {}: baseband mode, no PFB window generated",
@@ -103,6 +108,15 @@ size_t calc_pool_size() {
 }
 int init() {
   auto &cfg = GlobalConfig::getInstance();
+  // thread synchronization
+  size_t enabled_subbands = 0;
+  for (size_t i = 0; i < cfg.subbands.size(); i++) {
+    if (!cfg.subbands[i]->enable)
+      continue;
+
+    enabled_subbands++;
+  }
+  cfg.total_threads = enabled_subbands;
 
   cfg.QUEUE_CAPACITY = calc_pool_size();
 
@@ -179,7 +193,6 @@ int init() {
       cfg.logger_->info("subband {} is disabled, skip it.", i);
       continue;
     }
-
     cfg.logger_->info("subband {}: starting thread on GPU {}", i,
                       cfg.subbands[i]->gpu_id);
 

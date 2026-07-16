@@ -3,7 +3,7 @@
 Debug: true
 # don't make the memory pool size > 128GB
 Memory_pool_per_stream: 8 # GB
-observation_mode: 1 # 观测模式 0 : baseband 1: spcetrum
+observation_mode: 0 # 观测模式 0 : baseband 1: spcetrum
 cal_mode: true
 # blanking  time 10ms before and after
 # cal_on_t: 5 # on time
@@ -65,21 +65,33 @@ subbands:
       - center_freq: 1280e6
 
   - gpu_id: 2
-    enable: false
+    enable: true
     start_freq: 0
     end_freq: 256e6
+    port: 60004
+    windows:
+      - center_freq: 128e6
 
   - gpu_id: 2
-    enable: false
+    enable: true
     start_freq: 0
     end_freq: 256e6
+    port: 60005
+    windows:
+      - center_freq: 128e6
 
   - gpu_id: 3
-    enable: false
+    enable: true
     start_freq: 0
     end_freq: 256e6
+    port: 60006
+    windows:
+      - center_freq: 128e6
 
   - gpu_id: 3
-    enable: false
+    enable: true
     start_freq: 0
     end_freq: 256e6
+    port: 60007
+    windows:
+      - center_freq: 128e6
