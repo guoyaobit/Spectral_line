@@ -18,6 +18,7 @@ Sender_Nic: ens81f0v0
 Baseband_Folder0: /data
 # disk2
 Baseband_Folder1: /data1
+subband_monitor: true
 subbands:
   # recv port from FPGA is  60000,60001
   # send to master node port from 60000

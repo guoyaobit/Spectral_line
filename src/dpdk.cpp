@@ -396,6 +396,22 @@ recv2mem(void *args)
             // Invalid Noise Source State,drop packets
             continue;
         }
+        if (cfg.subband_monitor && m_timestamp == 0)
+        {
+            std::string monitor_data_path =
+                "/dev/shm/subband_" + std::to_string(stream_id) + ".bin";
+            int fd = open(monitor_data_path.c_str(),
+                          O_WRONLY | O_CREAT | O_TRUNC,
+                          0666);
+
+            if (fd >= 0)
+            {
+                write(fd,
+                      rte_pktmbuf_mtod(mbuf, void *),
+                      rte_pktmbuf_pkt_len(mbuf));
+                close(fd);
+            }
+        }
         if (cfg.cal_mode)
         {
             if (pre_NosieSoureState == 0xff)

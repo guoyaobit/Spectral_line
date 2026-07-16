@@ -116,7 +116,7 @@ public:
     bool cal_mode = false;
     std::string Baseband_folder0;
     std::string Baseband_folder1;
-
+    bool subband_monitor = false; // 是否开启子频段监控模式
     // how many packet in one batch(FFT period)
     int batchsize() const { return total_nfft / 4096; }
     // 每次 FFT 的时间长度
@@ -212,6 +212,8 @@ public:
                 Baseband_folder1 = Baseband_folder1 + "/" + datetime;
                 fs::create_directories(Baseband_folder1);
             }
+            if (config["subband_monitor"])
+                subband_monitor = config["subband_monitor"].as<bool>();
             if (config["win_bw"])
                 win_bw = config["win_bw"].as<float>();
             // std::cout<< win_bw<<std::endl;
