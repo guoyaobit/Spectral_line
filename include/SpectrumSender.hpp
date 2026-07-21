@@ -9,6 +9,8 @@
 #pragma pack(push, 1)
 typedef struct
 {
+    uint32_t magic = 0x534C5231;  // "SLR1"
+    uint16_t version = 1;
     uint64_t timestamp_ns;
     uint16_t subband_id; // 子频段编号
     uint16_t window_id;  // window id

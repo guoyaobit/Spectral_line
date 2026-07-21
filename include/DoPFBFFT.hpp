@@ -429,7 +429,6 @@ public:
                 for (int i = 0; i < m_config->windows.size(); i++)
                 {
                     size_t start_idx = m_config->windows[i]->start_idx;
-
                     m_config->windows[i]->header.timestamp_ns = m_timestamp[idx];
                     m_config->windows[i]->header.noise_state = acc_noise_state[idx];
                     m_config->windows[i]->sender.send_spectrum(m_config->windows[i]->header, &m_hring[idx][start_idx], channels * sizeof(float4));
