@@ -1,15 +1,11 @@
-# recv_streams: 16
-# total_nfft: 16777216 # Nfft or Fre channels
 Debug: true
 # don't make the memory pool size > 128GB
 Memory_pool_per_stream: 8 # GB
 observation_mode: 0 # 观测模式 0 : baseband 1: spcetrum
 cal_mode: true
-# blanking  time 10ms before and after
-# cal_on_t: 5 # on time
-# cal_off_t: 5 # off time
+cal_period: 1 # (s)
+cal_duty: 0.5 #
 integration_t: 1 # Intergration time s
-#
 win_bw: 256e6 # window bandwidth hz 1e6,2e6,4e6,32e6,64e6
 win_channels: 65536 # window channels  32768,65536
 Storage_node_ip: 192.168.101.3
@@ -21,10 +17,9 @@ Baseband_Folder0: /data
 Baseband_Folder1: /data1
 subband_monitor: true
 subbands:
-  # recv port from FPGA is  60000,60001
+  # recv dest port from FPGA is  60000,60001
   # send to master node port from 60000
   #  subband 0
-
   - gpu_id: 0
     enable: true
     start_freq: 384e6
@@ -35,7 +30,7 @@ subbands:
     # - center_freq: 2201e6
     # - center_freq: 2202e6
     # - center_freq: 2203e6
-
+  #  subband 1
   # recv port from FPGA is  60002,60003
   - gpu_id: 0
     enable: true
@@ -47,7 +42,7 @@ subbands:
     # - center_freq: 2501e6
     # - center_freq: 2502e6
     # - center_freq: 2503e6
-
+  # recv dest port from FPGA is  60003,60004
   - gpu_id: 1
     enable: true
     start_freq: 896e6
@@ -55,7 +50,7 @@ subbands:
     port: 60002
     windows:
       - center_freq: 1024e6
-
+  # recv dest port from FPGA is  60004,60005
   - gpu_id: 1
     enable: true
     start_freq: 1152e6
@@ -63,7 +58,7 @@ subbands:
     port: 60003
     windows:
       - center_freq: 1280e6
-
+  # recv dest port from FPGA is  60006,60007
   - gpu_id: 2
     enable: true
     start_freq: 0
