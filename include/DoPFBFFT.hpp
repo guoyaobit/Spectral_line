@@ -214,24 +214,12 @@ public:
         CUDA_CHECK(cudaMalloc((void **)&m_d_pfbedB, device_pfbed_bytes)); // m_Nfft complexf
         CUDA_CHECK(cudaMemset(m_d_pfbedB, 0, device_pfbed_bytes));
         // fft
-        // m_fft_done.resize(m_ringcap);
-        // m_ffted_bufsA.resize(m_ringcap);
-        // m_ffted_bufsB.resize(m_ringcap);
-        // for (int i = 0; i < m_ringcap; i++)
-        {
-            // m_ffted_bufsA = m_d_pfbedA;
-            // m_ffted_bufsB = m_d_pfbedB;
-            CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsA, device_pfbed_bytes)); // m_Nfft complexf
-            CUDA_CHECK(cudaMemset(m_ffted_bufsA, 0, device_pfbed_bytes));
-            CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsB, device_pfbed_bytes)); // m_Nfft complexf
-            CUDA_CHECK(cudaMemset(m_ffted_bufsB, 0, device_pfbed_bytes));
 
-            // cudaEventCreateWithFlags(&m_fft_done[i], cudaEventDisableTiming);
-        }
-        // stockes and ACC
-        // CUDA_CHECK(cudaMalloc((void **)&m_acc_stokes_IQUV, m_Nfft * sizeof(float4))); //
-        // CUDA_CHECK(cudaMemset(m_acc_stokes_IQUV, 0, m_Nfft * sizeof(float4)));
-        // final result
+        CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsA, device_pfbed_bytes)); // m_Nfft complexf
+        CUDA_CHECK(cudaMemset(m_ffted_bufsA, 0, device_pfbed_bytes));
+        CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsB, device_pfbed_bytes)); // m_Nfft complexf
+        CUDA_CHECK(cudaMemset(m_ffted_bufsB, 0, device_pfbed_bytes));
+
         CUDA_CHECK(cudaMallocHost((void **)&m_result_ptr, m_Nfft * sizeof(float4)));
         cudaMemset(m_result_ptr, 0, m_Nfft * sizeof(float4));
 
@@ -258,9 +246,6 @@ public:
         m_grd_total = (m_total_samples + m_blk_convert - 1) / m_blk_convert;
 
         m_grd_nfft = (m_Nfft + m_blk_convert - 1) / m_blk_convert;
-        // cudaEventCreate(&eventA);
-        // cudaEventCreate(&eventB);
-        // cudaEventCreate(&event_finish);
         cudaEventCreate(&evtH2DA_done);
         cudaEventCreate(&evtH2DB_done);
 
@@ -278,18 +263,6 @@ public:
         // }
         m_acc_len = cfg.integration_time() / cfg.fft_period();
         cal_blank_len = 10e-3 / cfg.fft_period(); // drop 10ms before and after cal trigger.
-        // printf("%d\n",cal_blank_len);
-        // printf("%f,%f\n",cfg.integration_time(),cfg.fft_period());
-        // printf("acc_len = %d\n",m_acc_len);
-        // std::string fname = "subband_" + std::to_string(m_subband_id);
-        // std::thread writer_thread([fname, this]()
-        //                           {
-        //                               while (1)
-        //                               {
-        //                                   cudaEventSynchronize(event_finish); // 等待 GPU 完成
-        //                                   write_to_file(fname, m_result_ptr, m_Nfft);
-        //                               } });
-        // writer_thread.detach();
 
         SLOT_SIZE = m_Nfft * sizeof(float4);
 
@@ -311,12 +284,7 @@ public:
                            });
         writer.detach();
     }
-    // void select_windows(int idx)
-    // {
-    //     auto windows = m_config[m_subband_id].windows;
-    //     auto total_BW = m_config[m_subband_id].BW;
-
-    // }
+    // Avoid lose arp while start dpdk
     bool set_static_arp(const std::string &ip,
                         const std::string &mac,
                         const std::string &dev)
@@ -414,19 +382,7 @@ public:
                 m_hused[idx] = false;
                 idx = (idx + 1) % NUM_SLOTS;
             }
-            // else
-            // {
-            //     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            // }
         }
-
-        // // 设置 header
-        // dadaFile.setHeader("OBS_FREQ", "1400.0");
-        // dadaFile.setHeader("NCHAN", "1024");
-        // dadaFile.setHeader("TSAMP", "64e-6");
-
-        // // 写 header
-        // dadaFile.writeHeader();
     }
     ~GpuPfbFft()
     {
@@ -470,35 +426,16 @@ public:
     bool accumulate_one_block()
     {
         auto &cfg = GlobalConfig::getInstance();
-        // void *testdata;
-        // cudaMallocHost((void **)&testdata, cfg.batchsize() * sizeof(Packet));
-        // memset(testdata, 0, cfg.batchsize() * sizeof(Packet));
-        // cudaMemcpyAsync(m_rawA, testdata, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, m_stream);
-        // cudaMemcpyAsync(m_rawB, testdata, cfg.batchsize() * sizeof(Packet), cudaMemcpyHostToDevice, m_stream);
-        // Cudamemf(testdata);
-        // return false;
-
-        // cudaEvent_t event;
-        // cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
         PacketBatch *readblockA = nullptr;
         PacketBatch *readblockB = nullptr;
 
-        // auto futA = std::async(std::launch::async, [&]
-        //                        { m_queueA->wait_dequeue(readblockA); });
-        // auto futB = std::async(std::launch::async, [&]
-        //                        { m_queueB->wait_dequeue(readblockB); });
-
-        // // 等待两个任务完成
-        // futA.get();
         // futB.get();
         m_queueA->wait_dequeue(readblockA);
-        // CUDA_CHECK(cudaStreamSynchronize(sH2DA));
         m_queueB->wait_dequeue(readblockB);
-        // CUDA_CHECK(cudaStreamSynchronize(sH2DB));
         if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95)
             cfg.logger_->debug("Buffed {} batch in queue,more than 95%%", m_queueA->size_approx());
         // printf("Got dual block data on sub band %d", m_subband_id);
-        // TODO GOT PKT ID FROM PKT
+        //
         size_t m_pktidA = readblockA->pkt_id[0];
         size_t m_pktidB = readblockB->pkt_id[0];
         if (cfg.Debug_mode)
@@ -511,30 +448,6 @@ public:
             noise_state = readblockA->noise_state[0];
             acc_noise_state[m_hhead] = noise_state;
         }
-        // if (cfg.cal_mode)
-        // {
-        // auto m_noise_state = readblockA->noise_state[0];
-        // cal_mode_unstable = false;
-        // for (int i = 0; i < cfg.batchsize(); i++)
-        // {
-        //     if (readblockA->noise_state[i] != m_noise_state or readblockB->noise_state[i] != m_noise_state)
-        //     {
-        //         if (cfg.Debug_mode)
-        //         {
-        //             cfg.logger_->info("Got one batch data,while cal state changes");
-        //         }
-        //         cal_mode_unstable = true;
-        //     }
-        // }
-        // if (m_acc_id == cal_blank_len)
-        //     noise_state = readblockA->noise_state[0];
-        // }
-
-        // if (cal_mode_unstable)
-        // {
-        //     memset(readblockA->buffer, 0, cfg.batchsize() * sizeof(Packet));
-        //     memset(readblockB->buffer, 0, cfg.batchsize() * sizeof(Packet));
-        // }
         for (int i = 0; i < cfg.batchsize(); i++)
         {
             if (readblockA->pkt_id[i] != m_pktidA + i)
@@ -563,7 +476,6 @@ public:
     }
     void submit_PFB_FFT()
     {
-
         // trans raw int8 block data to float and save to gpu ring
         int blockSize = 256; // 推荐 128 / 256 / 512
         int gridSize = (m_Nfft + blockSize - 1) / blockSize;
@@ -593,18 +505,8 @@ public:
         fftshift_1d<<<gridSize, blockSize, 0, sPFBB>>>(
             m_ffted_bufsB, m_Nfft);
         cudaEventRecord(evtPFBB_done, sPFBB);
-
-        // CUDA_CHECK(cudaStreamSynchronize(m_stream));
-        // CUDA_CHECK(cudaStreamSynchronize(m_stream));
         m_block_id++;
     }
-
-    // block until stream completes this object's work
-    // void synchronize()
-    // {
-    //     CUDA_CHECK(cudaStreamSynchronize(m_stream));
-    //     CUDA_CHECK(cudaStreamSynchronize(m_stream));
-    // }
 
     void StokesAcc()
     {

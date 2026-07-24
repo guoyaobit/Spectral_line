@@ -78,7 +78,7 @@ private:
 
         char basename[64];
         // snprintf used per preference
-        if (std::snprintf(basename, sizeof(basename), "subband_%02d_%04u.vdif", m_subband_id, file_index++) < 0)
+        if (std::snprintf(basename, sizeof(basename), "subband_%02d_%04u_dual.vdif", m_subband_id, file_index++) < 0)
         {
             GlobalConfig::getInstance().logger_->error("baseband: snprintf failed for filename");
             return -1;
