@@ -14,7 +14,6 @@
 #include <sys/types.h>
 
 #include <Globalcfg.hpp>
-#include <VDIFheader.hpp>
 // Ensure PacketBatch, Packet, and moodycamel queue headers are included in build
 
 class baseband
@@ -204,36 +203,26 @@ public:
         float gain4B =
             7.0f / (3.0f * rmsB);
 
-        VDIFHeader header;
-        header.setBitsPerSample(cfg.Baseband_bits);
-        header.setFrameLength(HEADER_SIZE + FRAME_PAYLOAD);
-        header.setStation(0x5154);
-
         if (fd < 0)
         {
             cfg.logger_->error("baseband: invalid file descriptor before write");
             return;
         }
         uint32_t frame_no = 0;
+        size_t payload_size_A;
+        size_t payload_size_B;
         for (int i = 0; i < frames_to_write; ++i)
         {
-            size_t payload_size_A;
-            size_t payload_size_B;
-
             if (cfg.Baseband_bits == 8)
             {
-                payload_size_A = 8192;
-                payload_size_B = 8192;
+                payload_size_A = FRAME_PAYLOAD;
+                payload_size_B = FRAME_PAYLOAD;
                 memcpy(vdif_payloadA,
                        readblockA->pkts[i]->payload,
                        FRAME_PAYLOAD);
-
                 memcpy(vdif_payloadB,
                        readblockB->pkts[i]->payload,
                        FRAME_PAYLOAD);
-
-                payload_size_A = FRAME_PAYLOAD;
-                payload_size_B = FRAME_PAYLOAD;
             }
             else if (cfg.Baseband_bits == 4)
             {
@@ -263,16 +252,17 @@ public:
                         vdif_payloadB,
                         rmsB);
             }
-            header.setThread(m_subband_id * 2);
-            header.setFrameLength(
+            readblockA->hdrs[i].setThread(m_subband_id * 2);
+            readblockA->hdrs[i].setFrameLength(
                 HEADER_SIZE + payload_size_A);
-            if (write_all(fd, header.data(), HEADER_SIZE) != 0)
+            if (write_all(fd, readblockA->hdrs[i].data(), HEADER_SIZE) != 0)
                 return;
             if (write_all(fd, vdif_payloadA, payload_size_A) != 0)
                 return;
-
-            header.setThread(m_subband_id * 2 + 1);
-            if (write_all(fd, header.data(), HEADER_SIZE) != 0)
+            readblockB->hdrs[i].setThread(m_subband_id * 2 + 1);
+            readblockB->hdrs[i].setFrameLength(
+                HEADER_SIZE + payload_size_A);
+            if (write_all(fd, readblockB->hdrs[i].data(), HEADER_SIZE) != 0)
                 return;
             if (write_all(fd, vdif_payloadB, payload_size_B) != 0)
                 return;

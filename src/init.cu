@@ -40,6 +40,7 @@ PacketBatch *allocatePacketBatch(Packet *buffer, size_t numpkts) {
   batch->buffer = buffer;
 
   batch->pkts.resize(numpkts);
+  batch->hdrs.resize(numpkts);
   batch->pkt_id.resize(numpkts);
   batch->noise_state.resize(numpkts);
   batch->timestamps.resize(numpkts);

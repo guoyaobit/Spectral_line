@@ -446,6 +446,7 @@ recv2mem(void *args)
         batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
         batch->noise_state[pkt_idx_inbatch] = m_NosieSoureState;
         batch->timestamps[pkt_idx_inbatch] = m_timestamp;
+        rte_memcpy((void *)(batch->hdrs[pkt_idx_inbatch].data()),rte_pktmbuf_mtod(mbuf, uint8_t *) + 42,32);
         // copy one packet data to struct
         rte_memcpy(pkt->payload, rte_pktmbuf_mtod(mbuf, uint8_t *) + 42 + 32, 8192);
         rte_pktmbuf_free(mbuf);
