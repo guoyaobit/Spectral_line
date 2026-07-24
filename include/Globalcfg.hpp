@@ -17,7 +17,6 @@
 #include <condition_variable>
 #include <mutex>
 
-
 struct Packet
 {
     uint8_t payload[8192]; // 4096*(Re + Im)
@@ -113,7 +112,7 @@ public:
     // default para
     bool Debug_mode = false;
     uint8_t max_streams = 16;        // 最大接收流数
-    uint8_t enabled_streams = 0; // 实际启用的接收流数
+    uint8_t enabled_streams = 0;     // 实际启用的接收流数
     const int sampling_rate = 256e6; // samaping rate
     std::string Storage_node_ip, Storage_node_mac, Sender_Nic;
     const int precision = 1 + 1;  // real 8bit ,image 8bit
@@ -127,6 +126,7 @@ public:
     bool cal_mode = false;
     std::string Baseband_folder0;
     std::string Baseband_folder1;
+    uint8_t Baseband_bits = 8;
     bool subband_monitor = false; // 是否开启子频段监控模式
     // how many packet in one batch(FFT period)
     int batchsize() const { return total_nfft / 4096; }
@@ -222,6 +222,14 @@ public:
                 else
                 {
                     throw std::runtime_error("配置文件缺少 Baseband_Folder1!");
+                }
+                if (config["Baseband_bits"] && config["Baseband_bits"].IsScalar())
+                {
+                    Baseband_bits = config["Baseband_bits"].as<uint8_t>();
+                }
+                else
+                {
+                    throw std::runtime_error("配置文件缺少 Baseband_bits!");
                 }
 
                 namespace fs = std::filesystem;

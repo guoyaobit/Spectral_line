@@ -15,6 +15,8 @@ Sender_Nic: ens81f0v0
 Baseband_Folder0: /data
 # disk2
 Baseband_Folder1: /data1
+# baseband_bits 8,4,2
+Baseband_bits: 8
 subband_monitor: true
 subbands:
   # recv dest port from FPGA is  60000,60001

@@ -31,6 +31,8 @@ private:
     std::string m_folder;
 
     static constexpr size_t FRAME_PAYLOAD = 8192;
+    uint8_t vdif_payloadA[FRAME_PAYLOAD];
+    uint8_t vdif_payloadB[FRAME_PAYLOAD];
     static constexpr size_t HEADER_SIZE = 32;
 
     // write_all: returns 0 on success, -1 on error (logs)
@@ -98,6 +100,33 @@ private:
 public:
     baseband(int);
     ~baseband();
+    float calc_rms(PacketBatch *batch)
+    {
+        double power = 0.0;
+        uint64_t count = 0;
+
+        for (int p = 0; p < batch->count; p++)
+        {
+            const int8_t *src =
+                reinterpret_cast<const int8_t *>(
+                    batch->pkts[p]->payload);
+
+            // IQ IQ IQ
+            for (size_t i = 0; i < FRAME_PAYLOAD; i += 2)
+            {
+                int8_t I = src[i];
+                int8_t Q = src[i + 1];
+
+                power +=
+                    double(I) * I +
+                    double(Q) * Q;
+
+                count += 2;
+            }
+        }
+
+        return sqrt(power / count);
+    }
 
     // collectdata handles errors locally (logs + returns) rather than throwing
     void collectdata()
@@ -167,9 +196,17 @@ public:
                 return;
             }
         }
+        float rmsA = calc_rms(readblockA);
+        float rmsB = calc_rms(readblockB);
+        float gain4A =
+            7.0f / (3.0f * rmsA);
+
+        float gain4B =
+            7.0f / (3.0f * rmsB);
 
         VDIFHeader header;
-        header.setFrameLength(HEADER_SIZE + FRAME_PAYLOAD, 8);
+        header.setBitsPerSample(cfg.Baseband_bits);
+        header.setFrameLength(HEADER_SIZE + FRAME_PAYLOAD);
         header.setStation(0x5154);
 
         if (fd < 0)
@@ -177,25 +214,144 @@ public:
             cfg.logger_->error("baseband: invalid file descriptor before write");
             return;
         }
-
+        uint32_t frame_no = 0;
         for (int i = 0; i < frames_to_write; ++i)
         {
+            size_t payload_size_A;
+            size_t payload_size_B;
+
+            if (cfg.Baseband_bits == 8)
+            {
+                payload_size_A = 8192;
+                payload_size_B = 8192;
+                memcpy(vdif_payloadA,
+                       readblockA->pkts[i]->payload,
+                       FRAME_PAYLOAD);
+
+                memcpy(vdif_payloadB,
+                       readblockB->pkts[i]->payload,
+                       FRAME_PAYLOAD);
+
+                payload_size_A = FRAME_PAYLOAD;
+                payload_size_B = FRAME_PAYLOAD;
+            }
+            else if (cfg.Baseband_bits == 4)
+            {
+                payload_size_A =
+                    pack_4bit(
+                        readblockA->pkts[i]->payload,
+                        vdif_payloadA,
+                        gain4A);
+
+                payload_size_B =
+                    pack_4bit(
+                        readblockB->pkts[i]->payload,
+                        vdif_payloadB,
+                        gain4B);
+            }
+            else
+            {
+                payload_size_A =
+                    pack_2bit(
+                        readblockA->pkts[i]->payload,
+                        vdif_payloadA,
+                        rmsA);
+
+                payload_size_B =
+                    pack_2bit(
+                        readblockB->pkts[i]->payload,
+                        vdif_payloadB,
+                        rmsB);
+            }
             header.setThread(m_subband_id * 2);
+            header.setFrameLength(
+                HEADER_SIZE + payload_size_A);
             if (write_all(fd, header.data(), HEADER_SIZE) != 0)
                 return;
-            if (write_all(fd, &readblockA->buffer[i], FRAME_PAYLOAD) != 0)
+            if (write_all(fd, vdif_payloadA, payload_size_A) != 0)
                 return;
 
             header.setThread(m_subband_id * 2 + 1);
             if (write_all(fd, header.data(), HEADER_SIZE) != 0)
                 return;
-            if (write_all(fd, &readblockB->buffer[i], FRAME_PAYLOAD) != 0)
+            if (write_all(fd, vdif_payloadB, payload_size_B) != 0)
                 return;
+            current_size +=
+                HEADER_SIZE + payload_size_A +
+                HEADER_SIZE + payload_size_B;
+        }
+    }
+    size_t pack_4bit(
+        const uint8_t *src,
+        uint8_t *dst,
+        float gain)
+    {
+        const int8_t *input =
+            reinterpret_cast<const int8_t *>(src);
+
+        size_t out = 0;
+
+        for (size_t i = 0; i < FRAME_PAYLOAD; i += 2)
+        {
+            int a = lrintf(input[i] * gain);
+            int b = lrintf(input[i + 1] * gain);
+
+            a = std::clamp(a, -8, 7);
+            b = std::clamp(b, -8, 7);
+
+            dst[out++] =
+                ((a & 0xf) << 4) |
+                (b & 0xf);
         }
 
-        current_size += bytes_to_write;
+        return out;
+    }
+    inline uint8_t q2(float x)
+    {
+        if (x < -0.981)
+            return 0;
 
-        // TODO: return/release PacketBatch to pool per project semantics
+        if (x < 0)
+            return 1;
+
+        if (x < 0.981)
+            return 2;
+
+        return 3;
+    }
+    size_t pack_2bit(
+        const uint8_t *src,
+        uint8_t *dst,
+        float rms)
+    {
+        const int8_t *input =
+            reinterpret_cast<const int8_t *>(src);
+
+        size_t out = 0;
+
+        uint8_t temp = 0;
+        int shift = 6;
+
+        for (size_t i = 0; i < FRAME_PAYLOAD; i++)
+        {
+            uint8_t q =
+                q2(input[i] / rms);
+
+            temp |= q << shift;
+
+            if (shift == 0)
+            {
+                dst[out++] = temp;
+                temp = 0;
+                shift = 6;
+            }
+            else
+            {
+                shift -= 2;
+            }
+        }
+
+        return out;
     }
 };
 
