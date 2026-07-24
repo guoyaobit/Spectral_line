@@ -45,33 +45,6 @@ static constexpr size_t PKT_DATA_BYTES = 8192;
 static constexpr size_t SAMPLES_PER_PACKET = PKT_DATA_BYTES / 2; // 4096 complex samples (int8 Re/Im)
 // complex float type (cuFFT uses cufftComplex)
 using complexf = cufftComplex;
-// extern "C" __global__ void kernel_pfb_sum(
-//     const complexf *__restrict__ ring, // in
-//     const complexf *__restrict__ taps, // pfb windows
-//     complexf *__restrict__ output,     // out
-//     size_t m_Nfft,
-//     size_t num_taps //
-// )
-// {
-//     size_t p = blockIdx.x * blockDim.x + threadIdx.x;
-//     if (p >= m_Nfft)
-//         return;
-
-//     float acc_re = 0.0f;
-//     float acc_im = 0.0f;
-//     complexf acc = make_cuFloatComplex(0.0f, 0.0f);
-//     for (size_t t = 0; t < num_taps; ++t)
-//     {
-//         size_t idx = t * m_Nfft + p;
-//         complexf vin = ring[idx];
-//         complexf ht = taps[t * m_Nfft + p];
-//         acc_re = fmaf(vin.x, ht.x, fmaf(-vin.y, ht.y, acc_re));
-//         acc_im = fmaf(vin.x, ht.y, fmaf(vin.y, ht.x, acc_im));
-//     }
-
-//     output[p].x = acc_re;
-//     output[p].y = acc_im;
-// }
 extern "C" __global__ void stokes_IQUV_accumulate(
     complexf *__restrict__ A, //
     complexf *__restrict__ B, //
@@ -181,39 +154,17 @@ class GpuPfbFft
 {
 public:
     GpuPfbFft(
-        // moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *queueA,
-        //   moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *queueB,
         int subband_id,
-        // int gpu_id,
-        // size_t m_Nfft,
-        // size_t num_taps,
         const float *taps_host,
-        float4 *result
-        // int *acc_id
-        )
-        : // m_queueA(queueA),
-          //   m_queueB(queueB),
-          m_subband_id(subband_id),
-          //   m_gpu_id(gpu_id),
-          //   m_Nfft(m_Nfft),
-          //   m_num_taps(num_taps),
+        float4 *result)
+        : m_subband_id(subband_id),
           m_acc_stokes_IQUV(result)
-    //   m_acc_id(acc_id)
     {
-        // printf("m_Nfft: %d,taps: %d\n", m_Nfft, num_taps);
-
-        // if ((m_Nfft % SAMPLES_PER_PACKET) != 0)
-        // {
-        //     throw std::invalid_argument("m_Nfft must be multiple of SAMPLES_PER_PACKET (4096)");
-        // }
-
         auto &cfg = GlobalConfig::getInstance();
         m_config = cfg.subbands[m_subband_id];
 
         m_gpu_id = m_config->gpu_id;
         m_Nfft = cfg.total_nfft;
-        // m_queueA = &cfg.stream_queues[m_subband_id * 2];
-        // m_queueB = &cfg.stream_queues[m_subband_id * 2 + 1];
         m_queueA = &cfg.streams[m_subband_id * 2].queue;
         m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
 
@@ -223,14 +174,6 @@ public:
         // bytes to accumulate
         m_bytes_per_frame = m_packets_per_frame * PKT_DATA_BYTES;
         m_total_samples = m_num_taps * m_Nfft; // num_taps * m_Nfft samples for PFB input
-
-        // select device
-        // CUDA_CHECK(cudaSetDevice(m_gpu_id));
-
-        // CUDA_CHECK(cudaStreamCreate(&m_stream));
-        // CUDA_CHECK(cudaStreamCreate(&m_streamA));
-        // CUDA_CHECK(cudaStreamCreate(&m_streamB));
-
         // H2D streams
         cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking);
         cudaStreamCreateWithFlags(&sH2DB, cudaStreamNonBlocking);

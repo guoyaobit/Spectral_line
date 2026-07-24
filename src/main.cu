@@ -32,7 +32,7 @@ int main() {
   cfg.init_cv.wait(lock,
                    [&cfg] { return cfg.ready_threads == cfg.total_threads; });
   cfg.logger_->info("All subband threads are ready");
-  // start dpdk trhead
+  // start dpdk thread
   pthread_t dpdk_t;
   pthread_create(&dpdk_t, NULL, dpdk_thread, NULL);
   pthread_join(dpdk_t, NULL);

@@ -2,8 +2,8 @@ Debug: true
 # don't make the memory pool size > 128GB
 Memory_pool_per_stream: 8 # GB
 observation_mode: 0 # 观测模式 0 : baseband 1: spcetrum
-cal_mode: true
-cal_period: 1 # (s)
+cal_mode: false
+cal_period: 2 # (s)
 cal_duty: 0.5 #
 integration_t: 1 # Intergration time s
 win_bw: 256e6 # window bandwidth hz 1e6,2e6,4e6,32e6,64e6
