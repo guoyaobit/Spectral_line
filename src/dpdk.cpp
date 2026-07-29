@@ -16,8 +16,6 @@
 #include <Globalcfg.hpp>
 #include <iostream>
 #include <vector>
-
-#include "VDIFReader.hpp"
 #include "readerwriterqueue.h"
 #include "readerwritercircularbuffer.h"
 #include <chrono>
