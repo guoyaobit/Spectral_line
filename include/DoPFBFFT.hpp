@@ -277,12 +277,12 @@ public:
             memset(m_hring[i], 0, SLOT_SIZE);
             cudaEventCreateWithFlags(&m_hevents[i], cudaEventBlockingSync);
         }
-        std::thread writer([this]()
-                           {
-                               send_data();
-                               //    write_to_file();
-                           });
-        writer.detach();
+        std::thread pushresult([this]()
+                               {
+                                   send_data();
+                                   //    write_to_file();
+                               });
+        pushresult.detach();
     }
     // Avoid lose arp while start dpdk
     bool set_static_arp(const std::string &ip,
