@@ -16,7 +16,7 @@
 #include <filesystem>
 #include <condition_variable>
 #include <mutex>
-#include <VDIFheader.hpp>
+#include <vdif.hpp>
 struct Packet
 {
     uint8_t payload[8192]; // 4096*(Re + Im)
@@ -30,7 +30,7 @@ struct PacketBatch
     bool valid = true;
     std::vector<uint64_t> timestamps;
     Packet *buffer; // 连续大 buffer
-    std::vector<VDIFHeader> hdrs;
+    std::vector<VDIF> hdrs;
     std::vector<Packet *> pkts; // 一次 FFT 的数据包集合
 };
 

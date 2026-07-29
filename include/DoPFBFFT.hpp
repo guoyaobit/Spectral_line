@@ -9,7 +9,7 @@
 #include <iostream>
 // #include <syncstream>
 #include <inttypes.h>
-#include <VDIFReader.hpp>
+// #include <VDIFReader.hpp>
 #include <Globalcfg.hpp>
 #include <cuda_fp16.h>
 #include <fstream>

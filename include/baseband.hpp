@@ -252,17 +252,17 @@ public:
                         vdif_payloadB,
                         rmsB);
             }
-            readblockA->hdrs[i].setThread(m_subband_id * 2);
-            readblockA->hdrs[i].setFrameLength(
+            readblockA->hdrs[i].setThreadID(m_subband_id * 2);
+            readblockA->hdrs[i].setNumChannels(
                 HEADER_SIZE + payload_size_A);
-            if (write_all(fd, readblockA->hdrs[i].data(), HEADER_SIZE) != 0)
+            if (write_all(fd, readblockA->hdrs[i].headerPtr(), HEADER_SIZE) != 0)
                 return;
             if (write_all(fd, vdif_payloadA, payload_size_A) != 0)
                 return;
-            readblockB->hdrs[i].setThread(m_subband_id * 2 + 1);
-            readblockB->hdrs[i].setFrameLength(
+            readblockB->hdrs[i].setThreadID(m_subband_id * 2 + 1);
+            readblockB->hdrs[i].setNumChannels(
                 HEADER_SIZE + payload_size_A);
-            if (write_all(fd, readblockB->hdrs[i].data(), HEADER_SIZE) != 0)
+            if (write_all(fd, readblockB->hdrs[i].headerPtr(), HEADER_SIZE) != 0)
                 return;
             if (write_all(fd, vdif_payloadB, payload_size_B) != 0)
                 return;

@@ -21,6 +21,7 @@
 #include "readerwriterqueue.h"
 #include "readerwritercircularbuffer.h"
 #include <chrono>
+#include <vdif.hpp>
 
 #define RX_RING_SIZE 4096
 #define NUM_MBUFS 262144
@@ -317,19 +318,20 @@ recv2mem(void *args)
             continue;
         }
         total_pkts++;
-        VDIFPacket header(rte_pktmbuf_mtod(mbuf, uint8_t *) + 42, 32);
-        uint64_t m_seconds = header.getSecondsFromEpoch();
-        uint64_t m_frame_number = header.getFrameNumber();
-        uint64_t m_timestamp = header.getTimestamp();
-        uint32_t m_NosieSoureState = header.getNoiseSourceSate();
+        VDIF header;
+        header.copyIn(rte_pktmbuf_mtod(mbuf, uint8_t *) + 42, 32);
+        uint64_t m_seconds = header.getSecsInre();
+        uint64_t m_frame_number = header.getDfNumInSec();
+        uint32_t m_NosieSoureState = header.getNoiseSourceState();
+
         if (m_NosieSoureState != 0 && m_NosieSoureState != 1)
         {
-            cfg.logger_->warn("Stream {}: Invalid Noise Source State: {}, m_seconds {}, m_frame_number {},m_timestamp:{}",
-                              stream_id, m_NosieSoureState, m_seconds, m_frame_number, m_timestamp);
+            cfg.logger_->warn("Stream {}: Invalid Noise Source State: {}, m_seconds {}, m_frame_number {}",
+                              stream_id, m_NosieSoureState, m_seconds, m_frame_number);
             // Invalid Noise Source State,drop packets
             continue;
         }
-        if (cfg.subband_monitor && m_timestamp == 0)
+        if (cfg.subband_monitor && m_frame_number == 0)
         {
             std::string monitor_data_path =
                 "/dev/shm/subband_" + std::to_string(stream_id) + ".bin";
@@ -445,8 +447,8 @@ recv2mem(void *args)
         Packet *pkt = batch->pkts[pkt_idx_inbatch];
         batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
         batch->noise_state[pkt_idx_inbatch] = m_NosieSoureState;
-        batch->timestamps[pkt_idx_inbatch] = m_timestamp;
-        rte_memcpy((void *)(batch->hdrs[pkt_idx_inbatch].data()),rte_pktmbuf_mtod(mbuf, uint8_t *) + 42,32);
+        batch->hdrs[pkt_idx_inbatch] = header;
+        // rte_memcpy((void *)(batch->hdrs[pkt_idx_inbatch].data()),rte_pktmbuf_mtod(mbuf, uint8_t *) + 42,32);
         // copy one packet data to struct
         rte_memcpy(pkt->payload, rte_pktmbuf_mtod(mbuf, uint8_t *) + 42 + 32, 8192);
         rte_pktmbuf_free(mbuf);
