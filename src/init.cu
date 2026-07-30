@@ -44,7 +44,10 @@ PacketBatch *allocatePacketBatch(Packet *buffer, size_t numpkts) {
   batch->pkt_id.resize(numpkts);
   batch->noise_state.resize(numpkts);
   batch->timestamps.resize(numpkts);
-
+  for (size_t i = 0; i < numpkts; i++)
+  {
+	  batch->pkts[i] = &batch->buffer[i];
+  }
   return batch;
 }
 void freeDataBatch(PacketBatch *batch) {

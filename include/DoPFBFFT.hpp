@@ -219,7 +219,8 @@ public:
         CUDA_CHECK(cudaMemset(m_ffted_bufsA, 0, device_pfbed_bytes));
         CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsB, device_pfbed_bytes)); // m_Nfft complexf
         CUDA_CHECK(cudaMemset(m_ffted_bufsB, 0, device_pfbed_bytes));
-
+        CUDA_CHECK(cudaMalloc((void **)&m_acc_stokes_IQUV, m_Nfft * sizeof(float4))); //
+        CUDA_CHECK(cudaMemset(m_acc_stokes_IQUV, 0, m_Nfft * sizeof(float4)));
         CUDA_CHECK(cudaMallocHost((void **)&m_result_ptr, m_Nfft * sizeof(float4)));
         cudaMemset(m_result_ptr, 0, m_Nfft * sizeof(float4));
 
@@ -434,7 +435,7 @@ public:
         m_queueB->wait_dequeue(readblockB);
         if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95)
             cfg.logger_->debug("Buffed {} batch in queue,more than 95%%", m_queueA->size_approx());
-        // printf("Got dual block data on sub band %d", m_subband_id);
+        //  printf("Got dual block data on sub band %d", m_subband_id);
         //
         size_t m_pktidA = readblockA->pkt_id[0];
         size_t m_pktidB = readblockB->pkt_id[0];

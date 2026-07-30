@@ -318,10 +318,10 @@ recv2mem(void *args)
         total_pkts++;
         VDIF header;
         header.copyIn(rte_pktmbuf_mtod(mbuf, uint8_t *) + 42, 32);
-        uint64_t m_seconds = header.getSecsInre();
-        uint64_t m_frame_number = header.getDfNumInSec();
-        uint32_t m_NosieSoureState = header.getNoiseSourceState();
-
+        uint64_t m_seconds = header.getSecondsFromEpoch();
+        uint64_t m_frame_number = header.getFrameNumber();
+        uint32_t m_NosieSoureState = header.getNoiseSourceOn();
+//	std::cout<<m_seconds<<std::endl;
         if (m_NosieSoureState != 0 && m_NosieSoureState != 1)
         {
             cfg.logger_->warn("Stream {}: Invalid Noise Source State: {}, m_seconds {}, m_frame_number {}",
@@ -395,7 +395,7 @@ recv2mem(void *args)
         {
             if (expected_pkt_id != recv_packet_id)
             {
-                uint64_t lostnmber = recv_packet_id - expected_pkt_id;
+                int64_t lostnmber = recv_packet_id - expected_pkt_id;
                 total_lostnmber += lostnmber;
                 cfg.logger_->warn("Stream {}:total_lostnmber {},m_seconds {}, m_frame_number {},recv_packet_id:{} , expected_pkt_id: {} ,lost {} packets",
                                   stream_id, total_lostnmber, m_seconds, m_frame_number, recv_packet_id, expected_pkt_id, lostnmber);
