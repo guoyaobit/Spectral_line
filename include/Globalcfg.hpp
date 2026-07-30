@@ -112,6 +112,7 @@ public:
     }
     // default para
     bool Debug_mode = false;
+    uint8_t ServerID = 0;
     uint8_t max_streams = 16;        // 最大接收流数
     uint8_t enabled_streams = 0;     // 实际启用的接收流数
     const int sampling_rate = 256e6; // samaping rate
@@ -178,6 +179,8 @@ public:
             YAML::Node config = YAML::LoadFile(filename);
             if (config["Debug"])
                 Debug_mode = config["Debug"].as<bool>();
+            if(config["ServerID"])
+                ServerID = config["ServerID"].as<uint8_t>();
             if (config["Memory_pool_per_stream"])
                 Memory_pool_per_stream = config["Memory_pool_per_stream"].as<size_t>(); // GB
             if (config["observation_mode"])

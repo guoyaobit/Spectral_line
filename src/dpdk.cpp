@@ -332,7 +332,11 @@ recv2mem(void *args)
         if (cfg.subband_monitor && m_frame_number == 0)
         {
             std::string monitor_data_path =
-                "/dev/shm/subband_" + std::to_string(stream_id) + ".bin";
+                "/dev/shm/server_" +
+                std::to_string(cfg.ServerID) +
+                "_stream_" +
+                std::to_string(stream_id) +
+                ".bin";
             int fd = open(monitor_data_path.c_str(),
                           O_WRONLY | O_CREAT | O_TRUNC,
                           0666);
