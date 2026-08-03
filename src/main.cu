@@ -32,8 +32,6 @@ int main() {
   cfg.init_cv.wait(lock,
                    [&cfg] { return cfg.ready_threads == cfg.total_threads; });
   cfg.logger_->info("All subband threads are ready");
-  cfg.ready_threads = 0;
-  cfg.total_threads = cfg.subbands.size() * 2;
   // start dpdk thread
   pthread_t dpdk_t;
   pthread_create(&dpdk_t, NULL, dpdk_thread, NULL);

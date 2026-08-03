@@ -221,22 +221,6 @@ lcore_recv(void *arg)
     auto &cfg = GlobalConfig::getInstance();
     size_t pool_idx = 0;
     cfg.logger_->debug("Running locre_recv thread on port {} ,queue {} ,on core {}", port, queue_id, lcore_id);
-    std::unique_lock<std::mutex> lock(cfg.init_mutex);
-
-    cfg.ready_threads++;
-
-    if(cfg.ready_threads == cfg.total_threads)
-    {
-        cfg.init_cv.notify_all();
-    }
-    else
-    {
-        cfg.init_cv.wait(lock,
-            [&cfg]{
-                return cfg.ready_threads == cfg.total_threads;
-            });
-    }
-    
     while (1)
     {
         nb_rx = rte_eth_rx_burst(port, queue_id, bufs, BURST_SIZE);
@@ -611,11 +595,13 @@ int dpdk()
     // init port config
     auto lcore_params = generate_lcore_params(ports, queues_per_port, start_dest_port);
     int lastcore_id;
+    int rx_threads = 0;
     for (int i = 0; i < lcore_params.size(); ++i)
     {
         int subband_index = i / 2; // 每两个队列对应一个 subband
         if (cfg.subbands[subband_index]->enable)
         {
+            rx_threads+=2;
             rte_eal_remote_launch(lcore_recv, &lcore_params[i], lcore_params[i].lcore_id);
             rte_eal_remote_launch(recv2mem, &lcore_params[i], lcore_params[i].lcore_id + lcore_params.size());
         }
