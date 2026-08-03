@@ -1,5 +1,4 @@
 #pragma once
-
 #include <cstdint>
 #include <vector>
 #include <memory>
@@ -99,36 +98,9 @@ private:
 public:
     baseband(int);
     ~baseband();
-    float calc_rms(PacketBatch *batch)
-    {
-        double power = 0.0;
-        uint64_t count = 0;
 
-        for (int p = 0; p < batch->count; p++)
-        {
-            const int8_t *src =
-                reinterpret_cast<const int8_t *>(
-                    batch->pkts[p]->payload);
-
-            // IQ IQ IQ
-            for (size_t i = 0; i < FRAME_PAYLOAD; i += 2)
-            {
-                int8_t I = src[i];
-                int8_t Q = src[i + 1];
-
-                power +=
-                    double(I) * I +
-                    double(Q) * Q;
-
-                count += 2;
-            }
-        }
-
-        return sqrt(power / count);
-    }
-
-    // collectdata handles errors locally (logs + returns) rather than throwing
-    void collectdata()
+    // recoder handles errors locally (logs + returns) rather than throwing
+    void recoder()
     {
         auto &cfg = GlobalConfig::getInstance();
         PacketBatch *readblockA = nullptr;
@@ -136,55 +108,11 @@ public:
         m_queueA->wait_dequeue(readblockA);
         m_queueB->wait_dequeue(readblockB);
 
-        if (!readblockA || !readblockB)
-        {
-            cfg.logger_->error("baseband: dequeued null PacketBatch (A={}, B={})", (void *)readblockA, (void *)readblockB);
-            return;
-        }
-
         if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95)
             cfg.logger_->debug("BaseBand: Buffered {} batch in queue, >95%%", m_queueA->size_approx());
 
-        // use actual count (important fix)
-        int countA = readblockA->count;
-        int countB = readblockB->count;
-        bool invalidDetected = false;
-
-        if (countA != countB)
-        {
-            cfg.logger_->error("Packet count mismatch: A.count={} B.count={}", countA, countB);
-            invalidDetected = true;
-        }
-
-        size_t m_pktidA = (countA > 0) ? readblockA->pkt_id[0] : 0;
-        size_t m_pktidB = (countB > 0) ? readblockB->pkt_id[0] : 0;
-
-        int minCount = std::min(countA, countB);
-        for (int i = 0; i < minCount; ++i)
-        {
-            if (readblockA->pkt_id[i] != m_pktidA + static_cast<size_t>(i))
-                invalidDetected = true;
-            if (readblockB->pkt_id[i] != m_pktidB + static_cast<size_t>(i))
-                invalidDetected = true;
-        }
-
-        if (invalidDetected)
-        {
-            cfg.logger_->warn("baseband: invalid packet(s) detected in subband {}, zeroing {} entries", m_subband_id, minCount);
-            std::memset(readblockA->buffer, 0, static_cast<size_t>(minCount) * sizeof(Packet));
-            std::memset(readblockB->buffer, 0, static_cast<size_t>(minCount) * sizeof(Packet));
-            // choose semantic: mark as repaired so it's written as silence
-            readblockA->valid = true;
-            readblockB->valid = true;
-        }
-
         // determine how many frames to write: use actual count (A and B should be equal; use minCount)
-        int frames_to_write = minCount;
-        if (frames_to_write <= 0)
-        {
-            cfg.logger_->debug("baseband: zero frames to write for subband {}", m_subband_id);
-            return;
-        }
+        int frames_to_write = readblockA->count;
 
         uint64_t bytes_to_write = static_cast<uint64_t>(frames_to_write) * (FRAME_PAYLOAD + HEADER_SIZE) * 2;
         if (current_size + bytes_to_write > max_file_size)
@@ -195,153 +123,21 @@ public:
                 return;
             }
         }
-        float rmsA = calc_rms(readblockA);
-        float rmsB = calc_rms(readblockB);
-        float gain4A =
-            7.0f / (3.0f * rmsA);
-
-        float gain4B =
-            7.0f / (3.0f * rmsB);
-
-        if (fd < 0)
-        {
-            cfg.logger_->error("baseband: invalid file descriptor before write");
-            return;
-        }
-        uint32_t frame_no = 0;
-        size_t payload_size_A;
-        size_t payload_size_B;
+        // TODO
+        // if (cfg.Baseband_bits < 8)
+        // {
+        // calc_rms(readblockA->buffer);
+        // compress(readblockA->buffer, cfg.Baseband_bits);
+        // compress(readblockB->buffer, cfg.Baseband_bits);
+        // }
         for (int i = 0; i < frames_to_write; ++i)
         {
-            if (cfg.Baseband_bits == 8)
-            {
-                payload_size_A = FRAME_PAYLOAD;
-                payload_size_B = FRAME_PAYLOAD;
-                memcpy(vdif_payloadA,
-                       readblockA->pkts[i]->payload,
-                       FRAME_PAYLOAD);
-                memcpy(vdif_payloadB,
-                       readblockB->pkts[i]->payload,
-                       FRAME_PAYLOAD);
-            }
-            else if (cfg.Baseband_bits == 4)
-            {
-                payload_size_A =
-                    pack_4bit(
-                        readblockA->pkts[i]->payload,
-                        vdif_payloadA,
-                        gain4A);
-
-                payload_size_B =
-                    pack_4bit(
-                        readblockB->pkts[i]->payload,
-                        vdif_payloadB,
-                        gain4B);
-            }
-            else
-            {
-                payload_size_A =
-                    pack_2bit(
-                        readblockA->pkts[i]->payload,
-                        vdif_payloadA,
-                        rmsA);
-
-                payload_size_B =
-                    pack_2bit(
-                        readblockB->pkts[i]->payload,
-                        vdif_payloadB,
-                        rmsB);
-            }
-            readblockA->hdrs[i].setThreadID(m_subband_id * 2);
-            readblockA->hdrs[i].setNumChannels(
-                HEADER_SIZE + payload_size_A);
-            if (write_all(fd, readblockA->hdrs[i].headerPtr(), HEADER_SIZE) != 0)
-                return;
-            if (write_all(fd, vdif_payloadA, payload_size_A) != 0)
-                return;
-            readblockB->hdrs[i].setThreadID(m_subband_id * 2 + 1);
-            readblockB->hdrs[i].setNumChannels(
-                HEADER_SIZE + payload_size_A);
-            if (write_all(fd, readblockB->hdrs[i].headerPtr(), HEADER_SIZE) != 0)
-                return;
-            if (write_all(fd, vdif_payloadB, payload_size_B) != 0)
-                return;
-            current_size +=
-                HEADER_SIZE + payload_size_A +
-                HEADER_SIZE + payload_size_B;
+            write(fd, &readblockA->hdrs[i], HEADER_SIZE);
+            write(fd, readblockA->pkts[i], FRAME_PAYLOAD);
+            write(fd, &readblockB->hdrs[i], HEADER_SIZE);
+            write(fd, readblockB->pkts[i], FRAME_PAYLOAD);
         }
-    }
-    size_t pack_4bit(
-        const uint8_t *src,
-        uint8_t *dst,
-        float gain)
-    {
-        const int8_t *input =
-            reinterpret_cast<const int8_t *>(src);
-
-        size_t out = 0;
-
-        for (size_t i = 0; i < FRAME_PAYLOAD; i += 2)
-        {
-            int a = lrintf(input[i] * gain);
-            int b = lrintf(input[i + 1] * gain);
-
-            a = std::clamp(a, -8, 7);
-            b = std::clamp(b, -8, 7);
-
-            dst[out++] =
-                ((a & 0xf) << 4) |
-                (b & 0xf);
-        }
-
-        return out;
-    }
-    inline uint8_t q2(float x)
-    {
-        if (x < -0.981)
-            return 0;
-
-        if (x < 0)
-            return 1;
-
-        if (x < 0.981)
-            return 2;
-
-        return 3;
-    }
-    size_t pack_2bit(
-        const uint8_t *src,
-        uint8_t *dst,
-        float rms)
-    {
-        const int8_t *input =
-            reinterpret_cast<const int8_t *>(src);
-
-        size_t out = 0;
-
-        uint8_t temp = 0;
-        int shift = 6;
-
-        for (size_t i = 0; i < FRAME_PAYLOAD; i++)
-        {
-            uint8_t q =
-                q2(input[i] / rms);
-
-            temp |= q << shift;
-
-            if (shift == 0)
-            {
-                dst[out++] = temp;
-                temp = 0;
-                shift = 6;
-            }
-            else
-            {
-                shift -= 2;
-            }
-        }
-
-        return out;
+        current_size += bytes_to_write;
     }
 };
 
@@ -349,15 +145,12 @@ baseband::baseband(int sub_band_id)
     : m_subband_id(sub_band_id)
 {
     auto &cfg = GlobalConfig::getInstance();
-    // m_queueA = &cfg.stream_queues[m_subband_id * 2];
-    // m_queueB = &cfg.stream_queues[m_subband_id * 2 + 1];
     m_queueA = &cfg.streams[m_subband_id * 2].queue;
     m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
     if (m_subband_id < 4)
         m_folder = cfg.Baseband_folder0;
     else
         m_folder = cfg.Baseband_folder1;
-
     if (create_file() != 0)
     {
         // best-effort logging; constructor cannot throw per your preference

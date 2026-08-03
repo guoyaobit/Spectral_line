@@ -18,7 +18,7 @@ yaml_dep = dependency('yaml-cpp', required: true)
 fmt_dep = dependency('fmt', required: true)
 
 cuda = meson.get_compiler('cuda')
-cudart = cuda.find_library('cudart', required: true)
+cudart = cuda.find_library('cudart', dirs: '/usr/local/cuda/lib64', required: true)
 #cufft = cuda.find_library('cufft', required: true)
 cufft = cuda.find_library('cufft', dirs: '/usr/local/cuda/lib64', required: true)
 dpdk_lib = static_library(

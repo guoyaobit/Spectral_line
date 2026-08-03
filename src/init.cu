@@ -44,9 +44,8 @@ PacketBatch *allocatePacketBatch(Packet *buffer, size_t numpkts) {
   batch->pkt_id.resize(numpkts);
   batch->noise_state.resize(numpkts);
   batch->timestamps.resize(numpkts);
-  for (size_t i = 0; i < numpkts; i++)
-  {
-	  batch->pkts[i] = &batch->buffer[i];
+  for (size_t i = 0; i < numpkts; i++) {
+    batch->pkts[i] = &batch->buffer[i];
   }
   return batch;
 }
@@ -75,7 +74,7 @@ void subband_thread(int subband_id) {
     std::unique_ptr<baseband> baseband_obj =
         std::make_unique<baseband>(subband_id);
     while (true) {
-      baseband_obj->collectdata();
+      baseband_obj->recoder();
     }
   } else if (cfg.observation_mode == 1) // spectrum line mode
   {
