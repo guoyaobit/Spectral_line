@@ -221,7 +221,22 @@ lcore_recv(void *arg)
     auto &cfg = GlobalConfig::getInstance();
     size_t pool_idx = 0;
     cfg.logger_->debug("Running locre_recv thread on port {} ,queue {} ,on core {}", port, queue_id, lcore_id);
+    std::unique_lock<std::mutex> lock(cfg.init_mutex);
 
+    cfg.ready_threads++;
+
+    if(cfg.ready_threads == cfg.total_threads)
+    {
+        cfg.init_cv.notify_all();
+    }
+    else
+    {
+        cfg.init_cv.wait(lock,
+            [&cfg]{
+                return cfg.ready_threads == cfg.total_threads;
+            });
+    }
+    
     while (1)
     {
         nb_rx = rte_eth_rx_burst(port, queue_id, bufs, BURST_SIZE);

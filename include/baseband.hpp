@@ -11,7 +11,7 @@
 #include <unistd.h> // write, close, read
 #include <sys/stat.h>
 #include <sys/types.h>
-
+#include <immintrin.h>
 #include <Globalcfg.hpp>
 // Ensure PacketBatch, Packet, and moodycamel queue headers are included in build
 
@@ -98,7 +98,76 @@ private:
 public:
     baseband(int);
     ~baseband();
+    inline void quantize4_complex_inplace_avx512(
+        uint8_t *buf,
+        size_t bytes)
+    {
+        size_t in = 0;
+        size_t out = 0;
 
+        for (; in + 64 <= bytes; in += 64)
+        {
+
+            // load 64 int8 samples
+            __m512i x =
+                _mm512_loadu_si512(
+                    (const void *)(buf + in));
+
+            /*
+             * 取高4bit
+             *
+             * 每个byte:
+             *
+             * xxxx xxxx
+             *
+             * ->
+             *
+             * xxxx
+             */
+            __m512i q =
+                _mm512_srli_epi16(x, 4);
+
+            alignas(64)
+                uint8_t tmp[64];
+
+            _mm512_store_si512(
+                (__m512i *)tmp,
+                q);
+
+            /*
+             * pack
+             *
+             * tmp[0] tmp[1]
+             *
+             * RE4 IM4
+             *
+             */
+            uint8_t packed[32];
+
+            for (int i = 0; i < 64; i += 2)
+            {
+                packed[i / 2] =
+                    (tmp[i] << 4) |
+                    tmp[i + 1];
+            }
+
+            memcpy(buf + out,
+                   packed,
+                   32);
+
+            out += 32;
+        }
+
+        // tail
+        while (in < bytes)
+        {
+            buf[out++] =
+                ((buf[in] >> 4) << 4) |
+                (buf[in + 1] >> 4);
+
+            in += 2;
+        }
+    }
     // recoder handles errors locally (logs + returns) rather than throwing
     void recoder()
     {
