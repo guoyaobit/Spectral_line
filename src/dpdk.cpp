@@ -141,17 +141,14 @@ port_init(uint16_t port, struct rte_mempool *mbuf_pool, uint16_t nb_rx_queues)
     struct rte_eth_dev_info dev_info;
     rte_eth_dev_info_get(port, &dev_info);
     struct rte_eth_conf port_conf = {0};
-    /* RX 多队列模式 */
+    port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
     port_conf.rxmode.mtu = 9000;
     port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM | RTE_ETH_TX_OFFLOAD_UDP_CKSUM | RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
 
     retval = rte_eth_dev_configure(port, nb_rx_queues, nb_rx_queues, &port_conf);
     if (retval < 0)
         return retval;
-
-    struct rte_eth_rxconf rxconf;
-    rxconf = dev_info.default_rxconf;
-    rxconf.rx_free_thresh = 1024;
+    
     for (uint16_t q = 0; q < nb_rx_queues; q++)
     {
 
@@ -165,6 +162,8 @@ port_init(uint16_t port, struct rte_mempool *mbuf_pool, uint16_t nb_rx_queues)
             return retval;
     }
 
+    rte_eth_promiscuous_disable(port);
+    rte_eth_allmulticast_disable(port);
     retval = rte_eth_dev_start(port);
     if (retval < 0)
         return retval;
@@ -177,8 +176,7 @@ port_init(uint16_t port, struct rte_mempool *mbuf_pool, uint16_t nb_rx_queues)
     create_catch_all_drop(port);
     // printf("🚀 Port %d ready, listening on UDP 60000-60003\n", port);
     // disable promisc
-    rte_eth_promiscuous_disable(port);
-    rte_eth_allmulticast_disable(port);
+
     return 0;
 }
 static int
@@ -328,7 +326,7 @@ recv2mem(void *args)
             // Invalid Noise Source State,drop packets
             continue;
         }
-        if (cfg.subband_monitor && m_frame_number == 0)
+        if (cfg.subband_monitor && m_frame_number == 1)
         {
             std::string monitor_data_path =
                 "/dev/shm/server_" +
@@ -343,7 +341,7 @@ recv2mem(void *args)
             if (fd >= 0)
             {
                 write(fd,
-                      rte_pktmbuf_mtod(mbuf, void *),
+                      rte_pktmbuf_mtod(mbuf, void *)+42,
                       rte_pktmbuf_pkt_len(mbuf));
                 close(fd);
             }

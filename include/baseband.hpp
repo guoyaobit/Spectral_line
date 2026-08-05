@@ -13,6 +13,8 @@
 #include <sys/types.h>
 #include <immintrin.h>
 #include <Globalcfg.hpp>
+#include <sys/uio.h>
+#include <unistd.h>
 // Ensure PacketBatch, Packet, and moodycamel queue headers are included in build
 
 class baseband
@@ -32,28 +34,6 @@ private:
     uint8_t vdif_payloadA[FRAME_PAYLOAD];
     uint8_t vdif_payloadB[FRAME_PAYLOAD];
     static constexpr size_t HEADER_SIZE = 32;
-
-    // write_all: returns 0 on success, -1 on error (logs)
-    static int write_all(int fd, const void *buf, size_t count)
-    {
-        const char *p = static_cast<const char *>(buf);
-        size_t remaining = count;
-        while (remaining > 0)
-        {
-            ssize_t nw = ::write(fd, p, remaining);
-            if (nw < 0)
-            {
-                if (errno == EINTR)
-                    continue;
-                auto &cfg = GlobalConfig::getInstance();
-                cfg.logger_->error("baseband: write failed: {} (errno={})", std::strerror(errno), errno);
-                return -1;
-            }
-            remaining -= static_cast<size_t>(nw);
-            p += nw;
-        }
-        return 0;
-    }
 
     // create_file: returns 0 on success, -1 on error
     int create_file()
@@ -98,68 +78,60 @@ private:
 public:
     baseband(int);
     ~baseband();
-    inline void quantize4_complex_inplace_avx512(
+    __attribute__((target("avx512f,avx512bw"))) inline void quantize4_avx512(
         uint8_t *buf,
         size_t bytes)
     {
         size_t in = 0;
         size_t out = 0;
 
-        for (; in + 64 <= bytes; in += 64)
+        alignas(64)
+            uint8_t tmp[64];
+
+        while (in + 64 <= bytes)
         {
 
-            // load 64 int8 samples
             __m512i x =
                 _mm512_loadu_si512(
-                    (const void *)(buf + in));
+                    (void *)(buf + in));
 
             /*
-             * 取高4bit
+             * signed shift
              *
-             * 每个byte:
-             *
-             * xxxx xxxx
-             *
-             * ->
-             *
-             * xxxx
+             * high nibble
              */
-            __m512i q =
-                _mm512_srli_epi16(x, 4);
 
-            alignas(64)
-                uint8_t tmp[64];
+            __m512i q =
+                _mm512_srai_epi16(
+                    x,
+                    4);
+
+            q =
+                _mm512_and_si512(
+                    q,
+                    _mm512_set1_epi8(0x0f));
 
             _mm512_store_si512(
                 (__m512i *)tmp,
                 q);
 
-            /*
-             * pack
-             *
-             * tmp[0] tmp[1]
-             *
-             * RE4 IM4
-             *
-             */
-            uint8_t packed[32];
-
             for (int i = 0; i < 64; i += 2)
             {
-                packed[i / 2] =
+                tmp[i / 2] =
                     (tmp[i] << 4) |
                     tmp[i + 1];
             }
 
-            memcpy(buf + out,
-                   packed,
-                   32);
+            memcpy(
+                buf + out,
+                tmp,
+                32);
 
+            in += 64;
             out += 32;
         }
 
-        // tail
-        while (in < bytes)
+        while (in + 1 < bytes)
         {
             buf[out++] =
                 ((buf[in] >> 4) << 4) |
@@ -182,7 +154,6 @@ public:
 
         // determine how many frames to write: use actual count (A and B should be equal; use minCount)
         int frames_to_write = readblockA->count;
-
         uint64_t bytes_to_write = static_cast<uint64_t>(frames_to_write) * (FRAME_PAYLOAD + HEADER_SIZE) * 2;
         if (current_size + bytes_to_write > max_file_size)
         {
@@ -192,19 +163,61 @@ public:
                 return;
             }
         }
+        iovec iov[4];
         // TODO
-        // if (cfg.Baseband_bits < 8)
-        // {
-        // calc_rms(readblockA->buffer);
-        // compress(readblockA->buffer, cfg.Baseband_bits);
-        // compress(readblockB->buffer, cfg.Baseband_bits);
-        // }
+        if (cfg.Baseband_bits == 4)
+        {
+            for (int i = 0; i < frames_to_write; ++i)
+            {
+                quantize4_avx512(readblockA->pkts[i]->payload, FRAME_PAYLOAD);
+                quantize4_avx512(readblockB->pkts[i]->payload, FRAME_PAYLOAD);
+                iov[0].iov_base = &readblockA->hdrs[i];
+                iov[0].iov_len = HEADER_SIZE;
+
+                iov[1].iov_base = readblockA->pkts[i]->payload;
+                iov[1].iov_len = FRAME_PAYLOAD / 2;
+
+                iov[2].iov_base = &readblockB->hdrs[i];
+                iov[2].iov_len = HEADER_SIZE;
+
+                iov[3].iov_base = readblockB->pkts[i]->payload;
+                iov[3].iov_len = FRAME_PAYLOAD / 2;
+                ssize_t ret = writev(fd, iov, 4);
+
+                if (ret < 0)
+                {
+                    cfg.logger_->error(
+                        "writev failed: {}",
+                        strerror(errno));
+
+                    return;
+                }
+                else
+                {
+                    std::cout << ret << std::endl;
+                }
+            }
+            current_size +=
+                frames_to_write *
+                (2 * HEADER_SIZE + FRAME_PAYLOAD);
+            return;
+        }
+
         for (int i = 0; i < frames_to_write; ++i)
         {
-            write(fd, &readblockA->hdrs[i], HEADER_SIZE);
-            write(fd, readblockA->pkts[i], FRAME_PAYLOAD);
-            write(fd, &readblockB->hdrs[i], HEADER_SIZE);
-            write(fd, readblockB->pkts[i], FRAME_PAYLOAD);
+            iov[0].iov_base = &readblockA->hdrs[i];
+            iov[0].iov_len = HEADER_SIZE;
+
+            iov[1].iov_base = readblockA->pkts[i]->payload;
+            iov[1].iov_len = FRAME_PAYLOAD;
+
+            iov[2].iov_base = &readblockB->hdrs[i];
+            iov[2].iov_len = HEADER_SIZE;
+
+            iov[3].iov_base = readblockB->pkts[i]->payload;
+            iov[3].iov_len = FRAME_PAYLOAD;
+
+            writev(fd, iov, 4);
         }
         current_size += bytes_to_write;
     }

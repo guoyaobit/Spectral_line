@@ -203,6 +203,7 @@ int init() {
 
     t.detach();
   }
-
+  // 5.
+  system("find /dev/shm -mindepth 1 -delete");
   return 0;
 }
