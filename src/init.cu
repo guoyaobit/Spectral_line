@@ -38,7 +38,6 @@ PacketBatch *allocatePacketBatch(Packet *buffer, size_t numpkts) {
 
   batch->count = numpkts;
   batch->buffer = buffer;
-
   batch->pkts.resize(numpkts);
   batch->hdrs.resize(numpkts);
   batch->pkt_id.resize(numpkts);
@@ -57,7 +56,6 @@ void freeDataBatch(PacketBatch *batch) {
 }
 
 void subband_thread(int subband_id) {
-  float4 *result;
   auto &cfg = GlobalConfig::getInstance();
   cudaSetDevice(cfg.subbands[subband_id]->gpu_id);
   {
@@ -86,7 +84,7 @@ void subband_thread(int subband_id) {
     std::vector<float> pfbwin(num_taps * Nfft);
     genPfbWin(pfbwin, num_taps * Nfft, num_taps);
     std::unique_ptr<GpuPfbFft> obj =
-        std::make_unique<GpuPfbFft>(subband_id, pfbwin.data(), result);
+        std::make_unique<GpuPfbFft>(subband_id, pfbwin.data());
     while (true) {
       obj->accumulate_one_block(); // CPU -> GPU 异步拷贝
       obj->submit_PFB_FFT();       // PFB+ FFT
