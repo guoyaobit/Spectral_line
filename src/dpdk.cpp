@@ -315,9 +315,16 @@ recv2mem(void *args)
         total_pkts++;
         VDIF header;
         header.copyIn(rte_pktmbuf_mtod(mbuf, uint8_t *) + 42, 32);
+        header.setEDV(1);
+        header.setComplex(true);
+        header.setBitsPerSample(8);
+        header.setLog2Channels(0);
+        header.setVDIFVersion(1);
+        header.setStationID(('U') |('W' << 8));
+        header.setThreadID(cfg.ServerID*16+stream_id);
         uint64_t m_seconds = header.getSecondsFromEpoch();
         uint64_t m_frame_number = header.getFrameNumber();
-        uint32_t m_NosieSoureState = header.getNoiseSourceOn();
+        uint32_t m_NosieSoureState = header.getNoiseSourceState();
 //	std::cout<<m_seconds<<std::endl;
         if (m_NosieSoureState != 0 && m_NosieSoureState != 1)
         {
@@ -328,6 +335,11 @@ recv2mem(void *args)
         }
         if (cfg.subband_monitor && m_frame_number == 1)
         {
+            // header.setEDV(1);
+            // header.setComplex(true);
+            // header.setBitsPerSample(8);
+            // header.setLog2Channels(0);
+            // header.setThreadID(cfg.ServerID*16+stream_id);
             std::string monitor_data_path =
                 "/dev/shm/server_" +
                 std::to_string(cfg.ServerID) +
@@ -340,9 +352,10 @@ recv2mem(void *args)
 
             if (fd >= 0)
             {
+                write(fd,header.headerPtr(),32);
                 write(fd,
-                      rte_pktmbuf_mtod(mbuf, void *)+42,
-                      rte_pktmbuf_pkt_len(mbuf));
+                      rte_pktmbuf_mtod(mbuf, void *)+42+32,
+                      8192);
                 close(fd);
             }
         }
