@@ -93,7 +93,7 @@ void subband_thread(int subband_id) {
   } else {
     cfg.logger_->error("subband {}: unknown observation mode {}", subband_id,
                        cfg.observation_mode);
-    return;
+    exit(1);
   }
 }
 
@@ -157,16 +157,26 @@ int init() {
   cfg.logger_->info("QUEUE_CAPACITY = {}", cfg.QUEUE_CAPACITY);
 
   cfg.logger_->info("Enabled streams = {}", enabled_streams);
+  if (cfg.observation_mode == 1 || cfg.observation_mode == 2) {
+    cfg.logger_->info("Allocating {:.2f} GiB pinned memory ({} bytes)",
+                      static_cast<double>(total_bytes) / 1024 / 1024 / 1024,
+                      total_bytes);
 
-  cfg.logger_->info("Allocating {:.2f} GiB pinned memory ({} bytes)",
-                    static_cast<double>(total_bytes) / 1024 / 1024 / 1024,
-                    total_bytes);
+    cudaError_t err =
+        cudaHostAlloc((void **)&cfg.packet_pool, total_bytes,
+                      cudaHostAllocPortable | cudaHostAllocWriteCombined);
 
-  cudaError_t err = cudaMallocHost((void **)&cfg.packet_pool, total_bytes);
+    if (err != cudaSuccess) {
+      throw std::runtime_error(cudaGetErrorString(err));
+    }
+  } else {
+    cfg.packet_pool = static_cast<Packet *>(malloc(total_bytes));
 
-  if (err != cudaSuccess) {
-    throw std::runtime_error(cudaGetErrorString(err));
+    if (cfg.packet_pool == nullptr) {
+      throw std::runtime_error("malloc packet_pool failed");
+    }
   }
+  memset(cfg.packet_pool, 0, total_bytes);
 
   // 3. 建立 PacketBatch 到连续内存的映射
   for (size_t s = 0; s < cfg.max_streams; ++s) {

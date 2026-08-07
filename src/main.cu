@@ -23,8 +23,14 @@ int main() {
   if (!cfg.initFromYaml("config.yaml")) {
     return false;
   }
-  if (cfg.observation_mode == 0 || cfg.observation_mode == 2) {
-    cfg.total_nfft = 65536;
+  if (cfg.observation_mode == 0) {
+    if (cfg.Baseband_bits == 8) {
+      cfg.total_nfft = 8192 * 256; // 8192 * 256
+    } else if (cfg.Baseband_bits == 4) {
+      cfg.total_nfft = 8192 * 256; // 8192 * 512
+    } else {
+      cfg.total_nfft = 8192 * 512; // 8192 * 512
+    }
   }
   // init memory
   init();
@@ -36,11 +42,6 @@ int main() {
   pthread_t dpdk_t;
   pthread_create(&dpdk_t, NULL, dpdk_thread, NULL);
   pthread_join(dpdk_t, NULL);
-  // while(1)
-  // {
-
-  // }
-  // cfg.logger_->info("quit\n");
 
   return 0;
 }

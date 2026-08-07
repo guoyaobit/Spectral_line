@@ -154,6 +154,77 @@ public:
 
         // determine how many frames to write: use actual count (A and B should be equal; use minCount)
         int frames_to_write = readblockA->count;
+
+        // TODO
+        if (cfg.Baseband_bits == 4)
+        {
+            if (current_size > max_file_size)
+            {
+                if (create_file() != 0)
+                {
+                    cfg.logger_->error("baseband: create_file failed during rotation");
+                    return;
+                }
+            }
+            constexpr int MAX_FRAMES_PER_WRITEV = 256;
+
+            iovec iov[MAX_FRAMES_PER_WRITEV * 4];
+
+            for (int base = 0; base < frames_to_write;)
+            {
+                int batch = std::min(
+                    MAX_FRAMES_PER_WRITEV,
+                    frames_to_write - base);
+
+                int idx = 0;
+
+                for (int i = 0; i < batch; i++)
+                {
+                    int frame = base + i;
+
+                    quantize4_avx512(
+                        readblockA->pkts[frame]->payload,
+                        FRAME_PAYLOAD);
+
+                    quantize4_avx512(
+                        readblockB->pkts[frame]->payload,
+                        FRAME_PAYLOAD);
+                    iov[idx++] = {
+                        &readblockA->hdrs[frame],
+                        HEADER_SIZE
+                    };
+                    iov[idx++] = {
+                        readblockA->pkts[frame]->payload,
+                        FRAME_PAYLOAD / 2
+                    };
+                    iov[idx++] = {
+                        &readblockB->hdrs[frame],
+                        HEADER_SIZE
+                    };
+                    iov[idx++] = {
+                        readblockB->pkts[frame]->payload,
+                        FRAME_PAYLOAD / 2
+                    };
+                }
+                ssize_t ret = writev(fd, iov, idx);
+                size_t expected =
+                    batch *
+                    (2 * HEADER_SIZE + FRAME_PAYLOAD);
+
+                if (ret != expected)
+                {
+                    cfg.logger_->error(
+                        "writev incomplete {} / {}",
+                        ret,
+                        expected);
+                    return;
+                }
+
+
+                base += batch;
+            }
+            return;
+        }
         uint64_t bytes_to_write = static_cast<uint64_t>(frames_to_write) * (FRAME_PAYLOAD + HEADER_SIZE) * 2;
         if (current_size + bytes_to_write > max_file_size)
         {
@@ -164,45 +235,6 @@ public:
             }
         }
         iovec iov[4];
-        // TODO
-        if (cfg.Baseband_bits == 4)
-        {
-            for (int i = 0; i < frames_to_write; ++i)
-            {
-                quantize4_avx512(readblockA->pkts[i]->payload, FRAME_PAYLOAD);
-                quantize4_avx512(readblockB->pkts[i]->payload, FRAME_PAYLOAD);
-                iov[0].iov_base = &readblockA->hdrs[i];
-                iov[0].iov_len = HEADER_SIZE;
-
-                iov[1].iov_base = readblockA->pkts[i]->payload;
-                iov[1].iov_len = FRAME_PAYLOAD / 2;
-
-                iov[2].iov_base = &readblockB->hdrs[i];
-                iov[2].iov_len = HEADER_SIZE;
-
-                iov[3].iov_base = readblockB->pkts[i]->payload;
-                iov[3].iov_len = FRAME_PAYLOAD / 2;
-                ssize_t ret = writev(fd, iov, 4);
-
-                if (ret < 0)
-                {
-                    cfg.logger_->error(
-                        "writev failed: {}",
-                        strerror(errno));
-
-                    return;
-                }
-                else
-                {
-                    std::cout << ret << std::endl;
-                }
-            }
-            current_size +=
-                frames_to_write *
-                (2 * HEADER_SIZE + FRAME_PAYLOAD);
-            return;
-        }
-
         for (int i = 0; i < frames_to_write; ++i)
         {
             iov[0].iov_base = &readblockA->hdrs[i];

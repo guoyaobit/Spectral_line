@@ -153,9 +153,6 @@ public:
     m_queueA = &cfg.streams[m_subband_id * 2].queue;
     m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
 
-    // bytes to accumulate
-    m_bytes_per_frame = m_packets_per_frame * PKT_DATA_BYTES;
-    m_total_samples = m_num_taps * m_Nfft; // num_taps * m_Nfft samples for PFB input
     // H2D streams
     cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking);
     cudaStreamCreateWithFlags(&sH2DB, cudaStreamNonBlocking);
@@ -177,7 +174,7 @@ public:
     CUDA_CHECK(cudaMalloc((void **)&m_rawB, m_Nfft * 2)); // rawdata formart unit8 re+imag
     CUDA_CHECK(cudaMemset(m_rawB, 0, m_Nfft * 2));
 
-    size_t device_input_bytes = m_total_samples * sizeof(complexf); // after conversion int8->float complex
+    size_t device_input_bytes = m_Nfft*m_num_taps * sizeof(complexf); // after conversion int8->float complex
     m_pfb_ringsize = m_Nfft * m_num_taps;
 
     // m_input_ringbytes = m_ringcap * device_input_bytes;
@@ -185,48 +182,37 @@ public:
     CUDA_CHECK(cudaMemset(m_d_inputA, 0, device_input_bytes));
     CUDA_CHECK(cudaMalloc((void **)&m_d_inputB, device_input_bytes)); // size num_taps*m_Nfft complexf
     CUDA_CHECK(cudaMemset(m_d_inputB, 0, device_input_bytes));
-    //  PFB
+    //  PFB result
     size_t device_pfbed_bytes = m_Nfft * sizeof(complexf);
     CUDA_CHECK(cudaMalloc((void **)&m_d_pfbedA, device_pfbed_bytes)); // m_Nfft complexf
     CUDA_CHECK(cudaMemset(m_d_pfbedA, 0, device_pfbed_bytes));
 
     CUDA_CHECK(cudaMalloc((void **)&m_d_pfbedB, device_pfbed_bytes)); // m_Nfft complexf
     CUDA_CHECK(cudaMemset(m_d_pfbedB, 0, device_pfbed_bytes));
-    // fft
-
+    
+    // fft result
     CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsA, device_pfbed_bytes)); // m_Nfft complexf
     CUDA_CHECK(cudaMemset(m_ffted_bufsA, 0, device_pfbed_bytes));
     CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsB, device_pfbed_bytes)); // m_Nfft complexf
     CUDA_CHECK(cudaMemset(m_ffted_bufsB, 0, device_pfbed_bytes));
-
+    
+    // stokes accumulate result
     CUDA_CHECK(cudaMalloc((void **)&m_acc_stokes_ON, m_Nfft * sizeof(float4)));
-
     CUDA_CHECK(cudaMalloc((void **)&m_acc_stokes_OFF, m_Nfft * sizeof(float4)));
-
     CUDA_CHECK(cudaMemset(m_acc_stokes_ON, 0, m_Nfft * sizeof(float4)));
-
     CUDA_CHECK(cudaMemset(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4)));
 
-    // allocate taps on device and copy
-    size_t taps_bytes = m_total_samples * sizeof(float);
+    // pfb filters
+    size_t taps_bytes = m_Nfft * m_num_taps * sizeof(float);
     CUDA_CHECK(cudaMalloc((void **)&m_filters, taps_bytes));
-    if (taps_host) {
-      CUDA_CHECK(cudaMemcpy(m_filters, taps_host, taps_bytes, cudaMemcpyHostToDevice));
-    } else {
-      // zero taps if not provided
-      CUDA_CHECK(cudaMemset(m_filters, 0, taps_bytes));
-    }
+    CUDA_CHECK(cudaMemcpy(m_filters, taps_host, taps_bytes, cudaMemcpyHostToDevice));
 
     // create cuFFT plan for m_Nfft complex->complex
     CUFFT_CHECK(cufftPlan1d(&m_planA, static_cast<int>(m_Nfft), CUFFT_C2C, 1));
     CUFFT_CHECK(cufftSetStream(m_planA, sPFBA));
     CUFFT_CHECK(cufftPlan1d(&m_planB, static_cast<int>(m_Nfft), CUFFT_C2C, 1));
     CUFFT_CHECK(cufftSetStream(m_planB, sPFBB));
-    // compute kernel launch sizes
-    m_blk_convert = 256;
-    m_grd_total = (m_total_samples + m_blk_convert - 1) / m_blk_convert;
-
-    m_grd_nfft = (m_Nfft + m_blk_convert - 1) / m_blk_convert;
+    // events for stream sync
     cudaEventCreate(&evtH2DA_done);
     cudaEventCreate(&evtH2DB_done);
 
@@ -238,23 +224,17 @@ public:
 
     cudaEventCreate(&evtStokes_done);
 
-    // if (!dadaFile.open("/data/example.dada"))
-    // {
-    //     std::cerr << "Failed to open file" << std::endl;
-    // }
+    // accumlate lens
     m_acc_len = cfg.integration_time() / cfg.fft_period();
-
     cal_blank_len = static_cast<uint32_t>(std::ceil(10e-3 / cfg.fft_period()));
-
+    
+    // result on host ring buffer
     SLOT_SIZE = m_Nfft * sizeof(float4);
-
     m_hring.resize(NUM_SLOTS);
 
     for (auto &slot : m_hring) {
       cudaMallocHost(reinterpret_cast<void **>(&slot.data), SLOT_SIZE);
-
       memset(slot.data, 0, SLOT_SIZE);
-
       cudaEventCreateWithFlags(&slot.event, cudaEventBlockingSync);
 
       slot.used = false;
@@ -440,7 +420,7 @@ public:
        * OFF积分
        */
       else {
-
+        m_acc_off_id++;
         if (m_acc_off_id >= cal_blank_len && m_acc_off_id < m_acc_len - cal_blank_len) {
 
           stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
@@ -470,8 +450,9 @@ public:
         }
       }
     } else {
+      m_acc_id++;
       stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
-      if (m_acc_on_id >= m_acc_len) {
+      if (m_acc_id >= m_acc_len) {
 
         if (m_hring[m_hhead].used) {
           cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
@@ -487,7 +468,7 @@ public:
 
         cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H);
 
-        m_acc_on_id = 0;
+        m_acc_id = 0;
 
         m_hhead = (m_hhead + 1) % NUM_SLOTS;
       }
@@ -499,14 +480,11 @@ private:
   moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueB;
   int m_subband_id;
   int m_gpu_id = 0;
-  size_t m_Nfft = 0;
-  size_t m_num_taps = 4;
-  size_t m_packets_per_frame = 0;
-  size_t m_bytes_per_frame = 0;
-  size_t m_total_samples = 0; // num_taps * m_Nfft
+  size_t m_Nfft = 0;// FFT size
+  size_t m_num_taps = 4;// PFB taps
 
   // device buffers
-  uint8_t *m_rawA = nullptr;
+  uint8_t *m_rawA = nullptr;// rawdata formart unit8 re+imag
   uint8_t *m_rawB = nullptr;
   // input
   complexf *m_d_inputA = nullptr; // num_taps*m_Nfft complexf (after int8->float conversion)
@@ -544,19 +522,11 @@ private:
 
   // stockes and ACC
   float4 *m_acc_stokes_ON;
-
   float4 *m_acc_stokes_OFF;
   u_int m_acc_len;
   u_int m_acc_id = 0;
-  bool cal_mode_unstable = false;
   uint32_t cal_blank_len = 0;
-  int m_resframe_id = 0;
-  // kernel launch parameters
-  int m_blk_convert = 256;
-  int m_grd_total = 0;
-  int m_grd_nfft = 0;
-  // signal process
-  float accumulated_time = 1; // second
+
 
   // result buffer
   const int NUM_SLOTS = 16;

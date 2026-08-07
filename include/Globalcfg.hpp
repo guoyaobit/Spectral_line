@@ -128,7 +128,7 @@ public:
     bool cal_mode = false;
     std::string Baseband_folder0;
     std::string Baseband_folder1;
-    uint8_t Baseband_bits = 8;
+    int Baseband_bits = 8;
     bool subband_monitor = false; // 是否开启子频段监控模式
     // how many packet in one batch(FFT period)
     int batchsize() const { return total_nfft / 4096; }
@@ -229,7 +229,7 @@ public:
                 }
                 if (config["Baseband_bits"] && config["Baseband_bits"].IsScalar())
                 {
-                    Baseband_bits = config["Baseband_bits"].as<uint8_t>();
+                    Baseband_bits = config["Baseband_bits"].as<int>();
                 }
                 else
                 {
