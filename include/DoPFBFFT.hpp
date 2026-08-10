@@ -102,7 +102,6 @@ extern "C" __global__ void kernel_pfb_sum(const complexf *__restrict__ ring, // 
 constexpr float scale = 1.0f / 127.0f;
 extern "C" __global__ void uint8_offsetIQ_to_ring(const uint8_t *__restrict__ src, // 移位二进制 I/Q
                                                   complexf *__restrict__ gpuRing,  // 环形缓冲区
-
                                                   size_t N,    // 复数样本数
                                                   size_t head, // 当前写指针 (host 传入)
                                                   size_t W     // 环形缓冲区容量 (复数样本数)
@@ -132,15 +131,130 @@ enum class NoiseState : uint8_t { OFF = 0, ON = 1, BLANK = 2 };
 
 struct HostRingSlot {
   float4 *data = nullptr;
-
   cudaEvent_t event = nullptr;
-
   bool used = false;
-
-  uint64_t timestamp = 0;
+  uint64_t first_timestamp_ns = 0;
+  uint64_t last_timestamp_ns = 0;
+  
   NoiseState noise_state = NoiseState::OFF;
   uint32_t cycle_id = 0;
 };
+/*
+ * VDIF epoch -> Unix timestamp (seconds)
+ *
+ * epoch 0:
+ *   2000-01-01 00:00:00 UTC
+ *
+ * epoch increases every 6 months
+ */
+static constexpr uint64_t vdif_epoch_unix_sec[64] =
+{
+    946684800ULL,   //  0: 2000-01-01
+    962409600ULL,   //  1: 2000-07-01
+    978307200ULL,   //  2: 2001-01-01
+    993945600ULL,   //  3: 2001-07-01
+
+    1009843200ULL,  //  4: 2002-01-01
+    1025481600ULL,  //  5: 2002-07-01
+    1041379200ULL,  //  6: 2003-01-01
+    1057017600ULL,  //  7: 2003-07-01
+
+    1072915200ULL,  //  8: 2004-01-01
+    1088640000ULL,  //  9: 2004-07-01
+    1104537600ULL,  // 10: 2005-01-01
+    1120176000ULL,  // 11: 2005-07-01
+
+    1136073600ULL,  // 12: 2006-01-01
+    1151712000ULL,  // 13: 2006-07-01
+    1167609600ULL,  // 14: 2007-01-01
+    1183248000ULL,  // 15: 2007-07-01
+
+    1199145600ULL,  // 16: 2008-01-01
+    1214864000ULL,  // 17: 2008-07-01
+    1230768000ULL,  // 18: 2009-01-01
+    1246406400ULL,  // 19: 2009-07-01
+
+    1262304000ULL,  // 20: 2010-01-01
+    1277942400ULL,  // 21: 2010-07-01
+    1293840000ULL,  // 22: 2011-01-01
+    1309478400ULL,  // 23: 2011-07-01
+
+    1325376000ULL,  // 24: 2012-01-01
+    1341100800ULL,  // 25: 2012-07-01
+    1356998400ULL,  // 26: 2013-01-01
+    1372636800ULL,  // 27: 2013-07-01
+
+    1388534400ULL,  // 28: 2014-01-01
+    1404172800ULL,  // 29: 2014-07-01
+    1420070400ULL,  // 30: 2015-01-01
+    1435708800ULL,  // 31: 2015-07-01
+
+    1451606400ULL,  // 32: 2016-01-01
+    1467331200ULL,  // 33: 2016-07-01
+    1483228800ULL,  // 34: 2017-01-01
+    1498867200ULL,  // 35: 2017-07-01
+
+    1514764800ULL,  // 36: 2018-01-01
+    1530403200ULL,  // 37: 2018-07-01
+    1546300800ULL,  // 38: 2019-01-01
+    1561939200ULL,  // 39: 2019-07-01
+
+    1577836800ULL,  // 40: 2020-01-01
+    1593561600ULL,  // 41: 2020-07-01
+    1609459200ULL,  // 42: 2021-01-01
+    1625097600ULL,  // 43: 2021-07-01
+
+    1640995200ULL,  // 44: 2022-01-01
+    1656633600ULL,  // 45: 2022-07-01
+    1672531200ULL,  // 46: 2023-01-01
+    1688169600ULL,  // 47: 2023-07-01
+
+    1704067200ULL,  // 48: 2024-01-01
+    1719792000ULL,  // 49: 2024-07-01
+    1735689600ULL,  // 50: 2025-01-01
+    1751328000ULL,  // 51: 2025-07-01
+
+    1767225600ULL,  // 52: 2026-01-01
+    1782864000ULL,  // 53: 2026-07-01
+    1798761600ULL,  // 54: 2027-01-01
+    1814400000ULL,  // 55: 2027-07-01
+
+    1830297600ULL,  // 56: 2028-01-01
+    1846022400ULL,  // 57: 2028-07-01
+    1861920000ULL,  // 58: 2029-01-01
+    1877558400ULL,  // 59: 2029-07-01
+
+    1893456000ULL,  // 60: 2030-01-01
+    1909094400ULL,  // 61: 2030-07-01
+    1924992000ULL,  // 62: 2031-01-01
+    1940630400ULL   // 63: 2031-07-01
+};
+
+
+inline uint64_t vdif_epoch_to_unix_sec(uint8_t epoch)
+{
+    if (epoch >= 64)
+        throw std::out_of_range("invalid VDIF epoch");
+
+    return vdif_epoch_unix_sec[epoch];
+}
+uint64_t vdif_to_timestamp_ns(
+        uint8_t epoch,
+        uint32_t seconds,
+        uint32_t frame)
+{
+    constexpr uint64_t NS_PER_SEC = 1000000000ULL;
+    constexpr uint64_t FRAME_NS = 16000ULL; // 62500 frame/s
+
+
+    uint64_t sec =
+        vdif_epoch_to_unix_sec(epoch)
+        + seconds;
+
+
+    return sec * NS_PER_SEC
+           + uint64_t(frame) * FRAME_NS;
+}
 // ---------------------- Class ----------------------
 class GpuPfbFft {
 public:
@@ -236,11 +350,6 @@ public:
       cudaMallocHost(reinterpret_cast<void **>(&slot.data), SLOT_SIZE);
       memset(slot.data, 0, SLOT_SIZE);
       cudaEventCreateWithFlags(&slot.event, cudaEventBlockingSync);
-
-      slot.used = false;
-      slot.timestamp = 0;
-      slot.noise_state = NoiseState::OFF;
-      slot.cycle_id = 0;
     }
     std::thread pushresult([this]() {
       send_data();
@@ -285,10 +394,12 @@ public:
           printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
         }
 
+        uint64_t fft_period_ns = static_cast<uint64_t>(cfg.fft_period() * 1e9);
         // std::cout << acc_noise_state[idx] << std::endl;
         for (size_t i = 0; i < m_config->windows.size(); i++) {
           size_t start_idx = m_config->windows[i]->start_idx;
-          m_config->windows[i]->header.timestamp_ns = slot.timestamp;
+          // TODO set timestamp and mjd
+          m_config->windows[i]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
 
           m_config->windows[i]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
 
@@ -300,16 +411,12 @@ public:
     }
   }
   ~GpuPfbFft() {}
-  uint32_t expected_frame_number;
-  uint64_t last_second;
-  FILE *logfile = nullptr;
 
   bool accumulate_one_block() {
     auto &cfg = GlobalConfig::getInstance();
     PacketBatch *readblockA = nullptr;
     PacketBatch *readblockB = nullptr;
 
-    // futB.get();
     m_queueA->wait_dequeue(readblockA);
     m_queueB->wait_dequeue(readblockB);
     if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95) cfg.logger_->debug("Buffed {} batch in queue,more than 95%%", m_queueA->size_approx());
@@ -333,6 +440,9 @@ public:
       memset(readblockB->buffer, 0, m_Nfft * 2);
     }
     m_noise_state = static_cast<NoiseState>(readblockA->noise_state[0]);
+    m_timestamp_ns = vdif_to_timestamp_ns(readblockA->hdrs[0].getReferenceEpoch(), 
+    readblockA->hdrs[0].getSecondsFromEpoch(), 
+    readblockA->hdrs[0].getFrameNumber());
     cudaMemcpyAsync(m_rawA, readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA);
     cudaEventRecord(evtH2DA_done, sH2DA);
     cudaMemcpyAsync(m_rawB, readblockB->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DB);
@@ -348,13 +458,13 @@ public:
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
     cudaStreamWaitEvent(sConvA, evtH2DA_done, 0);
-    // input: m_rawA, m_rawB output: m_d_inputA, m_d_inputB
+    //int8 -> complexf input: m_rawA, m_rawB output: m_d_inputA, m_d_inputB
     uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvA>>>(m_rawA, m_d_inputA, m_Nfft, m_pfb_head, m_pfb_ringsize);
     cudaEventRecord(evtConvA_done, sConvA);
     uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvB>>>(m_rawB, m_d_inputB, m_Nfft, m_pfb_head, m_pfb_ringsize);
     cudaEventRecord(evtConvB_done, sConvB);
     m_pfb_head = (m_pfb_head + m_Nfft) % m_pfb_ringsize;
-    // DO PFB
+    // 4 TAPS PFB
     cudaStreamWaitEvent(sPFBA, evtConvA_done, 0);
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBA>>>(m_d_inputA, m_filters, m_d_pfbedA, m_Nfft, m_num_taps, m_pfb_head);
     cudaStreamWaitEvent(sPFBB, evtConvB_done, 0);
@@ -378,7 +488,6 @@ public:
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
     cudaStreamWaitEvent(sD2H, evtPFBA_done, 0);
-
     cudaStreamWaitEvent(sD2H, evtPFBB_done, 0);
     if (cfg.cal_mode) {
 
@@ -386,7 +495,12 @@ public:
        * ON积分
        */
       if (m_noise_state == NoiseState::ON) {
+        if(m_acc_on_id == 0)
+        {
+          m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
+        }
         m_acc_on_id++;
+        // DROP first 10ms data to avoid cal signal transition
         if (m_acc_on_id >= cal_blank_len && m_acc_on_id < m_acc_len - cal_blank_len) {
 
           stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_ON);
@@ -395,7 +509,7 @@ public:
          * ON累计时间达到积分时间
          */
         if (m_acc_on_id >= m_acc_len) {
-
+          m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
           if (m_hring[m_hhead].used) {
             cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
           }
@@ -420,6 +534,10 @@ public:
        * OFF积分
        */
       else {
+        if(m_acc_off_id == 0)
+        {
+          m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
+        }
         m_acc_off_id++;
         if (m_acc_off_id >= cal_blank_len && m_acc_off_id < m_acc_len - cal_blank_len) {
 
@@ -429,6 +547,7 @@ public:
          * OFF累计时间达到积分时间
          */
         if (m_acc_off_id >= m_acc_len) {
+          m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
 
           if (m_hring[m_hhead].used) {
             cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
@@ -450,10 +569,15 @@ public:
         }
       }
     } else {
+      // no cal mode, just accumulate
+      if(m_acc_id == 0)
+      {
+        m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
+      }
       m_acc_id++;
       stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
       if (m_acc_id >= m_acc_len) {
-
+        m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
         if (m_hring[m_hhead].used) {
           cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
         }
@@ -463,13 +587,9 @@ public:
         m_hring[m_hhead].noise_state = NoiseState::OFF;
 
         cudaEventRecord(m_hring[m_hhead].event, sD2H);
-
-        m_hring[m_hhead].used = true;
-
-        cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H);
-
         m_acc_id = 0;
-
+        m_hring[m_hhead].used = true;
+        cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H); 
         m_hhead = (m_hhead + 1) % NUM_SLOTS;
       }
     }
@@ -535,6 +655,7 @@ private:
   int m_hhead = 0;
   SubbandConfig *m_config;
   NoiseState m_noise_state = NoiseState::OFF;
+  uint64_t m_timestamp_ns = 0;
   uint32_t m_acc_on_id = 0;
   uint32_t m_acc_off_id = 0;
   uint32_t acc_noise_blank = 0;
