@@ -6,6 +6,7 @@ project(
         'warning_level=2',
         'c_std=gnu11',
         'cpp_std=c++17',
+        'cuda_args=-arch=sm_86',
     ]
 )
 
@@ -18,9 +19,19 @@ yaml_dep = dependency('yaml-cpp', required: true)
 fmt_dep = dependency('fmt', required: true)
 
 cuda = meson.get_compiler('cuda')
-cudart = cuda.find_library('cudart', dirs: '/usr/local/cuda/lib64', required: true)
-#cufft = cuda.find_library('cufft', required: true)
-cufft = cuda.find_library('cufft', dirs: '/usr/local/cuda/lib64', required: true)
+
+cudart = cuda.find_library(
+    'cudart',
+    dirs: '/usr/local/cuda/lib64',
+    required: true
+)
+
+cufft = cuda.find_library(
+    'cufft',
+    dirs: '/usr/local/cuda/lib64',
+    required: true
+)
+
 dpdk_lib = static_library(
     'dpdk',
     'src/dpdk.cpp',
@@ -41,10 +52,7 @@ executable(
         cufft,
         yaml_dep,
         spdlog_dep,
-        fmt_dep
+        fmt_dep,
     ],
     link_with: dpdk_lib,
-    override_options: [
-        'cuda_args=-arch=sm_86'
-    ]
 )
