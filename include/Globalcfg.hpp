@@ -17,6 +17,11 @@
 #include <vdif.hpp>
 #include <vector>
 #include <yaml-cpp/yaml.h>
+enum class ObservationMode : uint8_t {
+  BASEBAND = 0, // 基带记录模式 (Raw Baseband Recording)
+  SPECTRAL = 1, // 谱线观测模式 (Spectral Line Observation)
+  CONTINUUM = 2 // 连续谱观测模式 (Continuum Observation)
+};
 struct Packet {
   uint8_t payload[8192]; // 4096*(Re + Im)
 };
@@ -113,7 +118,8 @@ public:
   float win_bw = 256e6;
   int win_channels = 4096;
   double integration_t = 1;
-  int observation_mode = 1; // 默认单窗口分子谱线模式
+  ObservationMode observation_mode =
+      ObservationMode::SPECTRAL; // 默认单窗口分子谱线模式
   bool cal_mode = false;
   std::string Baseband_folder0;
   std::string Baseband_folder1;
@@ -154,6 +160,22 @@ public:
     StreamContext(size_t queue_capacity) : queue(queue_capacity) {}
   };
   std::vector<StreamContext> streams;
+  ObservationMode parseObservationMode(const YAML::Node &node) {
+    const int mode = node.as<int>();
+
+    switch (mode) {
+    case 0:
+      return ObservationMode::BASEBAND;
+    case 1:
+      return ObservationMode::SPECTRAL;
+    case 2:
+      return ObservationMode::CONTINUUM;
+    default:
+      throw std::runtime_error(
+          "Invalid observation_mode: " + std::to_string(mode) +
+          " (valid values: 0, 1, 2)");
+    }
+  }
   // 初始化 YAML 配置
   bool initFromYaml(const std::string &filename) {
     try {
@@ -166,7 +188,7 @@ public:
         Memory_pool_per_stream =
             config["Memory_pool_per_stream"].as<size_t>(); // GB
       if (config["observation_mode"])
-        observation_mode = config["observation_mode"].as<int>();
+        observation_mode = parseObservationMode(config["observation_mode"]);
       if (config["Storage_node_ip"] && config["Storage_node_ip"].IsScalar()) {
         Storage_node_ip = config["Storage_node_ip"].as<std::string>();
       } else {
@@ -182,7 +204,7 @@ public:
       } else {
         throw std::runtime_error("配置文件缺少 Sender_Nic!");
       }
-      if (observation_mode == 0) {
+      if (observation_mode == ObservationMode::BASEBAND) {
         if (config["Baseband_Folder0"] &&
             config["Baseband_Folder0"].IsScalar()) {
           Baseband_folder0 = config["Baseband_Folder0"].as<std::string>();
@@ -331,10 +353,6 @@ public:
     }
     if (total_nfft < 65536) {
       logger_->error(" win_channels* 256e6/bw must >= 65536 {}", win_channels);
-      ok = false;
-    }
-    if (observation_mode < 0 || observation_mode > 3) {
-      logger_->error(" observation_mode must be 0,1,2 or 3");
       ok = false;
     }
     return ok;

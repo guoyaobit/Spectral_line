@@ -23,7 +23,7 @@ int main() {
   if (!cfg.initFromYaml("config.yaml")) {
     return false;
   }
-  if (cfg.observation_mode == 0) {
+  if (cfg.observation_mode == ObservationMode::BASEBAND) {
     if (cfg.Baseband_bits == 8) {
       cfg.total_nfft = 8192 * 256; // 8192 * 256
     } else if (cfg.Baseband_bits == 4) {

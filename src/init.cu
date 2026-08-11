@@ -64,7 +64,7 @@ void subband_thread(int subband_id) {
   cfg.init_cv.notify_all();
   cfg.logger_->info("subband {} ready {}/{}", subband_id, cfg.ready_threads,
                     cfg.total_threads);
-  if (cfg.observation_mode == 0) // baseband mode
+  if (cfg.observation_mode == ObservationMode::BASEBAND) // baseband mode
   {
     cfg.logger_->info("subband {}: baseband mode, no PFB window generated",
                       subband_id);
@@ -73,7 +73,10 @@ void subband_thread(int subband_id) {
     while (true) {
       baseband_obj->recoder();
     }
-  } else if (cfg.observation_mode == 1) // spectrum line mode
+  } else if (cfg.observation_mode == ObservationMode::SPECTRAL or
+             cfg.observation_mode ==
+                 ObservationMode::CONTINUUM) // spectrum line mode and continuum
+                                             // mode
   {
     cfg.logger_->info("subband {}: spectrum line mode, PFB window generated",
                       subband_id);
@@ -89,10 +92,6 @@ void subband_thread(int subband_id) {
       obj->submit_PFB_FFT();       // PFB+ FFT
       obj->StokesAcc();            // Stokes kernel
     }
-  } else {
-    cfg.logger_->error("subband {}: unknown observation mode {}", subband_id,
-                       cfg.observation_mode);
-    exit(1);
   }
 }
 
@@ -156,7 +155,11 @@ int init() {
   cfg.logger_->info("QUEUE_CAPACITY = {}", cfg.QUEUE_CAPACITY);
 
   cfg.logger_->info("Enabled streams = {}", enabled_streams);
-  if (cfg.observation_mode == 1 || cfg.observation_mode == 2) {
+  // DO NOT use cudaMallocHost for baseband mode,beause it does't need gpu
+  // memory, and it will cause the program to crash when the memory is
+  // insufficient.
+  if (cfg.observation_mode == ObservationMode::SPECTRAL ||
+      cfg.observation_mode == ObservationMode::CONTINUUM) {
     cfg.logger_->info("Allocating {:.2f} GiB pinned memory ({} bytes)",
                       static_cast<double>(total_bytes) / 1024 / 1024 / 1024,
                       total_bytes);
