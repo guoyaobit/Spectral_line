@@ -8,29 +8,71 @@
 #include <omp.h>
 #include <thread>
 // 生成长度 N 的 sinc 窗函数 (归一化), 存到 win
+// void genPfbWin(std::vector<float> &win, int N, int P) {
+//   if ((int)win.size() < N) {
+//     throw std::runtime_error("win size too small!");
+//   }
+
+//   float center = 1.0f * (N - 1) / 2.0f;
+//   float sum = 0.0f;
+
+//   // 生成 sinc 窗
+//   for (int i = 0; i < N; i++) {
+//     float t = i - center;
+//     float val;
+//     if (fabs(t) < 1e-6f) {
+//       val = 1.0f;
+//     } else {
+//       val = sinf(M_PI * t * P / N) / (M_PI * t * P / N);
+//     }
+//     win[i] = val;
+//     sum += val;
+//   }
+//   // 归一化
+//   for (int i = 0; i < N; i++) {
+//     win[i] /= sum;
+//   }
+// }
+
+// P-tap PFB prototype filter
+// N = FFT_size * P
+// h[n] = sinc * Hann
 void genPfbWin(std::vector<float> &win, int N, int P) {
-  if ((int)win.size() < N) {
+  if ((int)win.size() < N)
     throw std::runtime_error("win size too small!");
-  }
 
-  float center = 1.0f * (N - 1) / 2.0f;
-  float sum = 0.0f;
+  const double center = (N - 1) * 0.5;
 
-  // 生成 sinc 窗
+  double sum = 0.0;
+
+  // generate sinc * Hann window
   for (int i = 0; i < N; i++) {
-    float t = i - center;
-    float val;
-    if (fabs(t) < 1e-6f) {
-      val = 1.0f;
+    double x = i - center;
+
+    // sinc(pi*x*P/N)
+    double arg = M_PI * x * P / N;
+
+    double sinc;
+
+    if (fabs(arg) < 1e-12) {
+      sinc = 1.0;
     } else {
-      val = sinf(M_PI * t * P / N) / (M_PI * t * P / N);
+      sinc = sin(arg) / arg;
     }
-    win[i] = val;
-    sum += val;
+
+    // Hann window
+    double hann = 0.5 - 0.5 * cos(2.0 * M_PI * i / (N - 1));
+
+    double h = sinc * hann;
+
+    win[i] = static_cast<float>(h);
+
+    sum += h;
   }
-  // 归一化
+
+  // DC gain normalization
   for (int i = 0; i < N; i++) {
-    win[i] /= sum;
+    win[i] /= static_cast<float>(sum);
   }
 }
 PacketBatch *allocatePacketBatch(Packet *buffer, size_t numpkts) {

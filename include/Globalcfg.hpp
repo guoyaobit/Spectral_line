@@ -61,6 +61,11 @@ struct SubbandConfig {
   int port;
   std::vector<WindowConfig *> windows;
 };
+struct NoiseSourceConfig {
+  double period_ms = 1000.0;
+  double duty_cycle = 50.0;
+  double transition_blank_ms = 10.0;
+};
 class GlobalConfig {
 public:
   static GlobalConfig &getInstance() {
@@ -121,6 +126,7 @@ public:
   ObservationMode observation_mode =
       ObservationMode::SPECTRAL; // 默认单窗口分子谱线模式
   bool cal_mode = false;
+  NoiseSourceConfig noise_source;
   std::string Baseband_folder0;
   std::string Baseband_folder1;
   int Baseband_bits = 8;
@@ -259,6 +265,31 @@ public:
         integration_t = config["integration_t"].as<double>();
       if (config["cal_mode"])
         cal_mode = config["cal_mode"].as<bool>();
+      if (config["noise_source"]) {
+        const auto &ns = config["noise_source"];
+
+        if (ns["period_ms"])
+          noise_source.period_ms = ns["period_ms"].as<double>();
+
+        if (ns["duty_cycle"])
+          noise_source.duty_cycle = ns["duty_cycle"].as<double>();
+
+        if (ns["transition_blank_ms"])
+          noise_source.transition_blank_ms =
+              ns["transition_blank_ms"].as<double>();
+      }
+
+      if (noise_source.period_ms <= 0.0)
+        throw std::runtime_error("noise_source.period_ms must be > 0");
+
+      if (noise_source.duty_cycle <= 0.0 || noise_source.duty_cycle >= 100.0)
+        throw std::runtime_error(
+            "noise_source.duty_cycle must be between 0 and 100");
+
+      if (noise_source.transition_blank_ms < 0.0)
+        throw std::runtime_error(
+            "noise_source.transition_blank_ms must be >= 0");
+
       if (!config["subbands"] || !config["subbands"].IsSequence()) {
         throw std::runtime_error("配置文件缺少 subbands config!");
       }
