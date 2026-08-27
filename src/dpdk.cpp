@@ -287,7 +287,7 @@ static int recv2mem(void *args) {
   static auto start_time = std::chrono::steady_clock::now();
   static auto last_change_time = start_time;
   double duration;
-  bool cal_vaild = false;
+  // bool cal_vaild = false;
   uint64_t prebatchid = 0;
   while (1) {
     int ret = rte_ring_dequeue(ring, (void **)&mbuf);
@@ -316,6 +316,8 @@ static int recv2mem(void *args) {
       // Invalid Noise Source State,drop packets
       continue;
     }
+    // if(stream_id==0)
+    //	    std::cout<<m_frame_number<<std::endl;
     if (cfg.subband_monitor && m_frame_number == 1) {
       // header.setEDV(1);
       // header.setComplex(true);
@@ -334,32 +336,33 @@ static int recv2mem(void *args) {
         close(fd);
       }
     }
-    if (cfg.cal_mode) {
-      if (pre_NosieSoureState == 0xff)
-        pre_NosieSoureState = m_NosieSoureState;
-      if (pre_NosieSoureState != m_NosieSoureState) // state changed
-      {
-        if (cfg.Debug_mode) {
-          auto now = std::chrono::steady_clock::now();
-          duration =
-              std::chrono::duration<double>(now - last_change_time).count();
-          std::cout << duration
-                    << "s ,Noise State change to : " << m_NosieSoureState
-                    << std::endl;
-          pre_NosieSoureState = m_NosieSoureState;
-          last_change_time = now;
-          cfg.logger_->info("last state duration is {} s", duration);
-        }
-        if (!cal_vaild) // first state change, start to calculate
-          cal_vaild = true;
-      }
-      if (!cal_vaild) // state not change, and first state not change, not start
-                      // to calculate
-      {
-        rte_pktmbuf_free(mbuf);
-        continue;
-      }
-    }
+    // if (cfg.cal_mode) {
+    //   if (pre_NosieSoureState == 0xff)
+    //     pre_NosieSoureState = m_NosieSoureState;
+    //   if (pre_NosieSoureState != m_NosieSoureState) // state changed
+    //   {
+    //     if (cfg.Debug_mode) {
+    //       auto now = std::chrono::steady_clock::now();
+    //       duration =
+    //           std::chrono::duration<double>(now - last_change_time).count();
+    //       std::cout << duration
+    //                 << "s ,Noise State change to : " << m_NosieSoureState
+    //                 << std::endl;
+    //       pre_NosieSoureState = m_NosieSoureState;
+    //       last_change_time = now;
+    //       cfg.logger_->info("last state duration is {} s", duration);
+    //     }
+    //     if (!cal_vaild) // first state change, start to calculate
+    //       cal_vaild = true;
+    //   }
+    //   if (!cal_vaild) // state not change, and first state not change, not
+    //   start
+    //                   // to calculate
+    //   {
+    //     rte_pktmbuf_free(mbuf);
+    //     continue;
+    //   }
+    // }
 
     // log_packet(logfile, m_seconds, m_frame_number);
     // fflush(logfile);
@@ -370,6 +373,10 @@ static int recv2mem(void *args) {
     // 计算当前包在 batch 中的索引
     pkt_idx_inbatch = recv_packet_id % batchsize;
     if (expected_pkt_id == 0) {
+      if (pkt_idx_inbatch != 0) {
+        rte_pktmbuf_free(mbuf);
+        continue;
+      }
       // first received packet
       expected_pkt_id = recv_packet_id;
       // std::cout <<"First frameid is"<<expected_pkt_id<<std::endl;

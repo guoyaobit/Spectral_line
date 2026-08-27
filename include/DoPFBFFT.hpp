@@ -336,79 +336,103 @@ public:
     }
   }
   ~GpuPfbFft() {}
-  void update_noise_state(NoiseState new_state){
-      auto &cfg = GlobalConfig::getInstance();
-      if(new_state != m_noise_state)
-      {
-          uint64_t period_ns =
-              cfg.noise_source.period_ms*1000000ULL;
-          /*
-          * 第一次跳变
-          */
-          if(m_noise_cycle_start_ns == 0)
-          {
-              if(new_state == NoiseState::ON)
-              {
-                  // 假设ON开始就是周期起点
-                  m_noise_cycle_start_ns =
-                      m_timestamp_ns;
-              }
-              else
-              {
-                  // OFF开始，反推ON开始
-                  uint64_t on_ns =
-                      period_ns *
-                      cfg.noise_source.duty_cycle;
+  void update_noise_state(NoiseState new_state)
+{
+    auto &cfg = GlobalConfig::getInstance();
 
-                  m_noise_cycle_start_ns =
-                      m_timestamp_ns -
-                      on_ns;
-              }
-          }
-          m_last_transition_ns =
-              m_timestamp_ns;
-      }
-      m_noise_state = new_state;
-  }
-    bool is_noise_blank(uint64_t timestamp_ns)
+    uint64_t period_ns =
+        cfg.noise_source.period_ms * 1000000ULL;
+
+    uint64_t on_ns =
+        static_cast<uint64_t>(
+            period_ns * cfg.noise_source.duty_cycle);
+
+
+    if(new_state != m_noise_state)
+    {
+        /*
+         * 第一次状态跳变，建立周期参考
+         */
+        if(m_noise_cycle_start_ns == 0)
+        {
+            if(new_state == NoiseState::ON)
+            {
+                /*
+                 * ON开始就是周期起点
+                 */
+                m_noise_cycle_start_ns =
+                    m_timestamp_ns;
+            }
+            else
+            {
+                /*
+                 * 当前进入OFF
+                 *
+                 * OFF开始 = 周期起点 + ON时间
+                 *
+                 * 反推周期起点
+                 */
+                m_noise_cycle_start_ns =
+                    m_timestamp_ns - on_ns;
+            }
+        }
+        else
+        {
+            /*
+             * 周期固定，只需要在ON边沿修正漂移
+             */
+            if(new_state == NoiseState::ON)
+            {
+                m_noise_cycle_start_ns =
+                    m_timestamp_ns;
+            }
+        }
+
+
+        m_last_transition_ns = m_timestamp_ns;
+    }
+
+
+    m_noise_state = new_state;
+}
+  bool is_noise_blank(uint64_t timestamp_ns)
   {
+      if(m_noise_cycle_start_ns == 0)
+          return false;
       auto &cfg = GlobalConfig::getInstance();
+
       uint64_t period_ns =
-          static_cast<uint64_t>(
-              cfg.noise_source.period_ms * 1e6);
+          cfg.noise_source.period_ms * 1000000ULL;
+
       uint64_t on_ns =
           static_cast<uint64_t>(
-              period_ns * cfg.noise_source.duty_cycle);
+              period_ns *
+              cfg.noise_source.duty_cycle);
+
       uint64_t blank_ns =
-          static_cast<uint64_t>(
-              cfg.noise_source.transition_blank_ms * 1e6);
-      /*
-      * 当前周期相位
-      *
-      * 0 ---------------- period
-      * |
-      * ON
-      * 0 ---- on_ns ---- period
-      */
+          cfg.noise_source.transition_blank_ms *
+          1000000ULL;
+
       uint64_t phase =
-          (timestamp_ns -m_noise_cycle_start_ns)% period_ns;
-      /*
-      * 两个状态切换点:
-      *
-      * 1. 周期开始:
-      *    OFF -> ON
-      *
-      * 2. duty位置:
-      *    ON -> OFF
-      */
-      // 到 OFF->ON 切换点的距离
+          (timestamp_ns -
+          m_noise_cycle_start_ns)
+          % period_ns;
+
+      // OFF->ON切换点
       uint64_t dist_on =
-          std::min(phase,period_ns - phase);
-      // 到 ON->OFF 切换点的距离
-      uint64_t dist_off = (phase > on_ns) ? phase - on_ns : on_ns - phase;
-      uint64_t dist = std::min(dist_on,dist_off);
-      return dist <= blank_ns;
-  }
+          std::min(
+              phase,
+              period_ns - phase);
+
+      // ON->OFF切换点
+      uint64_t dist_off =
+          (phase >= on_ns) ?
+          phase - on_ns :
+          on_ns - phase;
+
+      return std::min(dist_on, dist_off)
+              <= blank_ns;
+  }  
   bool accumulate_one_block() {
     auto &cfg = GlobalConfig::getInstance();
     PacketBatch *readblockA = nullptr;
@@ -447,7 +471,7 @@ public:
         update_noise_state(new_state);
         //TODO test if the noise state is correct
         // printf("Subband %d timestamp_ns: %" PRIu64 " noise_state: %d\n", m_subband_id, m_timestamp_ns, static_cast<int>(m_noise_state));
-        blank = is_noise_blank(m_timestamp_ns);
+        
     }
 
     cudaMemcpyAsync(m_rawA, readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA);
@@ -495,8 +519,8 @@ public:
 
     cudaStreamWaitEvent(sD2H, evtPFBA_done, 0);
     cudaStreamWaitEvent(sD2H, evtPFBB_done, 0);
-    if (cfg.cal_mode and !blank) {
-
+    if (cfg.cal_mode) {
+      if( is_noise_blank(m_timestamp_ns)) return;
       /*
        * ON积分
        */
@@ -668,14 +692,9 @@ private:
   uint64_t m_timestamp_ns = 0;
   NoiseState m_noise_state = NoiseState::OFF;
   NoiseState pre_noise_state = NoiseState::OFF;
-  // uint64_t m_transition_time_ns = 0;
-  // uint64_t m_discard_until_ns = 0;
-  // uint64_t m_first_transition_time_ns = 0;
-  // uint64_t m_first_on_time_ns = 0;
-  // uint64_t m_first_off_time_ns = 0;
-  // bool m_in_transition = false;
   uint64_t m_noise_cycle_start_ns = 0;
   uint64_t m_last_transition_ns = 0;
+  bool m_noise_cycle_valid=false;
   bool blank = false;
   // static constexpr uint64_t CAL_BLANK_NS = 10ULL * 1000 * 1000;
   uint32_t m_acc_on_id = 0;

@@ -23,7 +23,8 @@ private:
     int m_subband_id;
     moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueA;
     moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueB;
-    int fd = -1;
+    int fd_x = -1;
+    int fd_y = -1;
     static constexpr uint64_t DEFAULT_MAX_FILE_SIZE = 4ULL * 1024 * 1024 * 1024; // 4 GB
     uint64_t max_file_size = DEFAULT_MAX_FILE_SIZE;
     uint64_t current_size = 0;
@@ -38,10 +39,15 @@ private:
     // create_file: returns 0 on success, -1 on error
     int create_file()
     {
-        if (fd >= 0)
+        if (fd_x >= 0)
         {
-            ::close(fd);
-            fd = -1;
+            ::close(fd_x);
+            fd_x = -1;
+        }
+        if (fd_y >= 0)
+        {
+            ::close(fd_x);
+            fd_x = -1;
         }
         current_size = 0;
 
@@ -55,18 +61,48 @@ private:
             cfg.logger_->error("baseband: create_directories({}) failed: {}", folder.string(), ec.message());
             return -1;
         }
+        const auto &subband = *cfg.subbands[m_subband_id];
 
-        char basename[64];
-        // snprintf used per preference
-        if (std::snprintf(basename, sizeof(basename), "subband_%02d_%04u_dual.vdif", m_subband_id, file_index++) < 0)
+        char basename_x[256];
+        char basename_y[256];
+
+        const unsigned int current_file_index = file_index++;
+
+        if (std::snprintf(basename_x,
+                        sizeof(basename_x),
+                        "%uM-%uM_X_%04u.vdif",
+                        static_cast<unsigned int>(subband.start_freq / 1e6f),
+                        static_cast<unsigned int>(subband.end_freq / 1e6f),
+                        current_file_index) < 0)
         {
-            GlobalConfig::getInstance().logger_->error("baseband: snprintf failed for filename");
+            GlobalConfig::getInstance().logger_->error(
+                "baseband: snprintf failed for Y polarization filename");
             return -1;
         }
 
-        std::filesystem::path filepath = folder / basename;
-        fd = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd < 0)
+        if (std::snprintf(basename_y,
+                        sizeof(basename_y),
+                        "%uM-%uM_Y_%04u.vdif",
+                        static_cast<unsigned int>(subband.start_freq / 1e6f),
+                        static_cast<unsigned int>(subband.end_freq / 1e6f),
+                        current_file_index) < 0)
+        {
+            GlobalConfig::getInstance().logger_->error(
+                "baseband: snprintf failed for Y polarization filename");
+            return -1;
+        }
+
+        std::filesystem::path filepath = folder / basename_x;
+        fd_x = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd_x < 0)
+        {
+            auto &cfg = GlobalConfig::getInstance();
+            cfg.logger_->error("baseband: open('{}') failed: {} (errno={})", filepath.string(), std::strerror(errno), errno);
+            return -1;
+        }
+        filepath = folder / basename_y;
+        fd_y = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd_y < 0)
         {
             auto &cfg = GlobalConfig::getInstance();
             cfg.logger_->error("baseband: open('{}') failed: {} (errno={})", filepath.string(), std::strerror(errno), errno);
@@ -155,77 +191,77 @@ public:
         // determine how many frames to write: use actual count (A and B should be equal; use minCount)
         int frames_to_write = readblockA->count;
 
-        // TODO
-        if (cfg.Baseband_bits == 4)
-        {
-            if (current_size > max_file_size)
-            {
-                if (create_file() != 0)
-                {
-                    cfg.logger_->error("baseband: create_file failed during rotation");
-                    return;
-                }
-            }
-            constexpr int MAX_FRAMES_PER_WRITEV = 256;
+        // // TODO
+        // if (cfg.Baseband_bits == 4)
+        // {
+        //     if (current_size > max_file_size)
+        //     {
+        //         if (create_file() != 0)
+        //         {
+        //             cfg.logger_->error("baseband: create_file failed during rotation");
+        //             return;
+        //         }
+        //     }
+        //     constexpr int MAX_FRAMES_PER_WRITEV = 256;
 
-            iovec iov[MAX_FRAMES_PER_WRITEV * 4];
+        //     iovec iov[MAX_FRAMES_PER_WRITEV * 4];
 
-            for (int base = 0; base < frames_to_write;)
-            {
-                int batch = std::min(
-                    MAX_FRAMES_PER_WRITEV,
-                    frames_to_write - base);
+        //     for (int base = 0; base < frames_to_write;)
+        //     {
+        //         int batch = std::min(
+        //             MAX_FRAMES_PER_WRITEV,
+        //             frames_to_write - base);
 
-                int idx = 0;
+        //         int idx = 0;
 
-                for (int i = 0; i < batch; i++)
-                {
-                    int frame = base + i;
+        //         for (int i = 0; i < batch; i++)
+        //         {
+        //             int frame = base + i;
 
-                    quantize4_avx512(
-                        readblockA->pkts[frame]->payload,
-                        FRAME_PAYLOAD);
+        //             quantize4_avx512(
+        //                 readblockA->pkts[frame]->payload,
+        //                 FRAME_PAYLOAD);
 
-                    quantize4_avx512(
-                        readblockB->pkts[frame]->payload,
-                        FRAME_PAYLOAD);
-                    iov[idx++] = {
-                        &readblockA->hdrs[frame],
-                        HEADER_SIZE
-                    };
-                    iov[idx++] = {
-                        readblockA->pkts[frame]->payload,
-                        FRAME_PAYLOAD / 2
-                    };
-                    iov[idx++] = {
-                        &readblockB->hdrs[frame],
-                        HEADER_SIZE
-                    };
-                    iov[idx++] = {
-                        readblockB->pkts[frame]->payload,
-                        FRAME_PAYLOAD / 2
-                    };
-                }
-                ssize_t ret = writev(fd, iov, idx);
-                size_t expected =
-                    batch *
-                    (2 * HEADER_SIZE + FRAME_PAYLOAD);
+        //             quantize4_avx512(
+        //                 readblockB->pkts[frame]->payload,
+        //                 FRAME_PAYLOAD);
+        //             iov[idx++] = {
+        //                 &readblockA->hdrs[frame],
+        //                 HEADER_SIZE
+        //             };
+        //             iov[idx++] = {
+        //                 readblockA->pkts[frame]->payload,
+        //                 FRAME_PAYLOAD / 2
+        //             };
+        //             iov[idx++] = {
+        //                 &readblockB->hdrs[frame],
+        //                 HEADER_SIZE
+        //             };
+        //             iov[idx++] = {
+        //                 readblockB->pkts[frame]->payload,
+        //                 FRAME_PAYLOAD / 2
+        //             };
+        //         }
+        //         ssize_t ret = writev(fd_x, iov, idx);
+        //         size_t expected =
+        //             batch *
+        //             (2 * HEADER_SIZE + FRAME_PAYLOAD);
 
-                if (ret != expected)
-                {
-                    cfg.logger_->error(
-                        "writev incomplete {} / {}",
-                        ret,
-                        expected);
-                    return;
-                }
+        //         if (ret != expected)
+        //         {
+        //             cfg.logger_->error(
+        //                 "writev incomplete {} / {}",
+        //                 ret,
+        //                 expected);
+        //             return;
+        //         }
 
 
-                base += batch;
-            }
-            return;
-        }
-        uint64_t bytes_to_write = static_cast<uint64_t>(frames_to_write) * (FRAME_PAYLOAD + HEADER_SIZE) * 2;
+        //         base += batch;
+        //     }
+        //     return;
+        // }
+        uint64_t bytes_to_write = static_cast<uint64_t>(frames_to_write) * (FRAME_PAYLOAD + HEADER_SIZE);
         if (current_size + bytes_to_write > max_file_size)
         {
             if (create_file() != 0)
@@ -234,22 +270,21 @@ public:
                 return;
             }
         }
-        iovec iov[4];
+        iovec iov_x[2],iov_y[2];
+
         for (int i = 0; i < frames_to_write; ++i)
         {
-            iov[0].iov_base = &readblockA->hdrs[i];
-            iov[0].iov_len = HEADER_SIZE;
+            iov_x[0].iov_base = &readblockA->hdrs[i];
+            iov_x[0].iov_len = HEADER_SIZE;
+            iov_x[1].iov_base = readblockA->pkts[i]->payload;
+            iov_x[1].iov_len = FRAME_PAYLOAD;
 
-            iov[1].iov_base = readblockA->pkts[i]->payload;
-            iov[1].iov_len = FRAME_PAYLOAD;
-
-            iov[2].iov_base = &readblockB->hdrs[i];
-            iov[2].iov_len = HEADER_SIZE;
-
-            iov[3].iov_base = readblockB->pkts[i]->payload;
-            iov[3].iov_len = FRAME_PAYLOAD;
-
-            writev(fd, iov, 4);
+            iov_y[0].iov_base = &readblockB->hdrs[i];
+            iov_y[0].iov_len = HEADER_SIZE;
+            iov_y[1].iov_base = readblockB->pkts[i]->payload;
+            iov_y[1].iov_len = FRAME_PAYLOAD;
+            writev(fd_x, iov_x, 2);
+            writev(fd_y,iov_y,2);
         }
         current_size += bytes_to_write;
     }
@@ -274,6 +309,6 @@ baseband::baseband(int sub_band_id)
 
 baseband::~baseband()
 {
-    if (fd >= 0)
-        ::close(fd);
+    if (fd_x >= 0)close(fd_x);
+    if (fd_y >= 0)close(fd_y);
 }
