@@ -25,7 +25,7 @@ private:
     moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueB;
     int fd_x = -1;
     int fd_y = -1;
-    static constexpr uint64_t DEFAULT_MAX_FILE_SIZE = 4ULL * 1024 * 1024 * 1024; // 4 GB
+    static constexpr uint64_t DEFAULT_MAX_FILE_SIZE = 32ULL * 1024 * 1024 * 1024; // 4 GB
     uint64_t max_file_size = DEFAULT_MAX_FILE_SIZE;
     uint64_t current_size = 0;
     uint32_t file_index = 0;
