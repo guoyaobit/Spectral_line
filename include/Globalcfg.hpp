@@ -342,6 +342,8 @@ public:
           w->header.channel_bw_hz = (float)sampling_rate / total_nfft;
           w->header.subband_start_freq = sb->start_freq;
           w->header.subband_end_freq = sb->end_freq;
+          // max 8 subbands in one server, so subband_id = ServerID*100
+          w->header.subband_id = ServerID * 8 + sb->subband_id;
           w->header.start_freq_hz =
               sb->start_freq + w->start_idx * sampling_rate / total_nfft;
           w->header.n_channels = win_channels;

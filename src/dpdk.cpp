@@ -336,35 +336,6 @@ static int recv2mem(void *args) {
         close(fd);
       }
     }
-    // if (cfg.cal_mode) {
-    //   if (pre_NosieSoureState == 0xff)
-    //     pre_NosieSoureState = m_NosieSoureState;
-    //   if (pre_NosieSoureState != m_NosieSoureState) // state changed
-    //   {
-    //     if (cfg.Debug_mode) {
-    //       auto now = std::chrono::steady_clock::now();
-    //       duration =
-    //           std::chrono::duration<double>(now - last_change_time).count();
-    //       std::cout << duration
-    //                 << "s ,Noise State change to : " << m_NosieSoureState
-    //                 << std::endl;
-    //       pre_NosieSoureState = m_NosieSoureState;
-    //       last_change_time = now;
-    //       cfg.logger_->info("last state duration is {} s", duration);
-    //     }
-    //     if (!cal_vaild) // first state change, start to calculate
-    //       cal_vaild = true;
-    //   }
-    //   if (!cal_vaild) // state not change, and first state not change, not
-    //   start
-    //                   // to calculate
-    //   {
-    //     rte_pktmbuf_free(mbuf);
-    //     continue;
-    //   }
-    // }
-
-    // log_packet(logfile, m_seconds, m_frame_number);
     // fflush(logfile);
     uint64_t recv_packet_id = m_seconds * 62500ULL + m_frame_number;
     uint batchsize = pool[0]->count;
