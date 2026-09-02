@@ -133,27 +133,60 @@ void continuum_power_accumulate(
     const complexf* __restrict__ A,
     const complexf* __restrict__ B,
     size_t N,
-    double* __restrict__ sumPower)
+    float* __restrict__ sumPower)
 {
-    size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+    __shared__ float sdata[256];
 
-    if (idx >= N)
-        return;
+    const unsigned int tid = threadIdx.x;
+    const size_t idx =
+        blockIdx.x * blockDim.x + tid;
 
-    float2 x = make_float2(A[idx].x, A[idx].y);
-    float2 y = make_float2(B[idx].x, B[idx].y);
+    float power = 0.0f;
 
-    float power =
-        fmaf(x.x, x.x, x.y * x.y) +
-        fmaf(y.x, y.x, y.y * y.y);
+    if (idx < N)
+    {
+        const float ax = A[idx].x;
+        const float ay = A[idx].y;
 
-    atomicAdd(sumPower, (double)power);
+        const float bx = B[idx].x;
+        const float by = B[idx].y;
+
+        power =
+            fmaf(ax, ax, ay * ay) +
+            fmaf(bx, bx, by * by);
+    }
+
+    sdata[tid] = power;
+    __syncthreads();
+
+    for (unsigned int s = blockDim.x / 2; s > 32; s >>= 1)
+    {
+        if (tid < s)
+            sdata[tid] += sdata[tid + s];
+
+        __syncthreads();
+    }
+
+    if (tid < 32)
+    {
+        volatile float* vsmem = sdata;
+
+        vsmem[tid] += vsmem[tid + 32];
+        vsmem[tid] += vsmem[tid + 16];
+        vsmem[tid] += vsmem[tid + 8];
+        vsmem[tid] += vsmem[tid + 4];
+        vsmem[tid] += vsmem[tid + 2];
+        vsmem[tid] += vsmem[tid + 1];
+    }
+
+    if (tid == 0)
+        atomicAdd(sumPower, sdata[0]);
 }
 enum class NoiseState : uint8_t { OFF = 0, ON = 1, BLANK = 2 };
 
 struct HostRingSlot {
   float4 *data = nullptr;
-  double sumPower = 0.0f;
+  float sumPower = 0.0f;
   cudaEvent_t event = nullptr;
   std::atomic<bool> used{false};
   uint64_t first_timestamp_ns = 0;
@@ -230,10 +263,10 @@ public:
 
     // allocate sum power for continuum
 
-    CUDA_CHECK(cudaMalloc((void **)&d_sumPower_ON, sizeof(double)));
-    CUDA_CHECK(cudaMemset(d_sumPower_ON, 0, sizeof(double)));
-    CUDA_CHECK(cudaMalloc((void **)&d_sumPower_OFF, sizeof(double)));
-    CUDA_CHECK(cudaMemset(d_sumPower_OFF, 0, sizeof(double)));
+    CUDA_CHECK(cudaMalloc((void **)&d_sumPower_ON, sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_sumPower_ON, 0, sizeof(float)));
+    CUDA_CHECK(cudaMalloc((void **)&d_sumPower_OFF, sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_sumPower_OFF, 0, sizeof(float)));
 
     // create cuFFT plan for m_Nfft complex->complex
     CUFFT_CHECK(cufftPlan1d(&m_planA, static_cast<int>(m_Nfft), CUFFT_C2C, 1));
@@ -300,16 +333,21 @@ public:
 
       if (slot.used.load(std::memory_order_acquire) && cudaEventQuery(slot.event) == cudaSuccess) {
         if (cfg.Debug_mode) {
-          float max = 0;
-          int max_freq = 0;
-          for (size_t i = 0; i < m_Nfft; i++) {
-            // if (m_hring[idx][i].x > max)
-            if (slot.data[i].x > max) {
-              max = m_hring[idx].data[i].x;
-              max_freq = i;
+          if(cfg.observation_mode == ObservationMode::SPECTRAL){
+            float max = 0;
+            int max_freq = 0;
+            for (size_t i = 0; i < m_Nfft; i++) {
+              // if (m_hring[idx][i].x > max)
+              if (slot.data[i].x > max) {
+                max = m_hring[idx].data[i].x;
+                max_freq = i;
+              }
             }
+            printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
           }
-          printf("%.2f Mhz+(%d)+%f Mhz\n", m_config->start_freq * 1e-6, max_freq, (float)max_freq * 256 / (float)m_Nfft);
+          if(cfg.observation_mode == ObservationMode::CONTINUUM) {
+            printf("Subband %d Continuum sumPower: %f\n", m_subband_id, slot.sumPower);
+          }
         }
 
         uint64_t fft_period_ns = static_cast<uint64_t>(cfg.fft_period() * 1e9);
@@ -317,18 +355,16 @@ public:
         if(cfg.observation_mode == ObservationMode::SPECTRAL) {
           for (size_t i = 0; i < m_config->windows.size(); i++) {
             size_t start_idx = m_config->windows[i]->start_idx;
-            // TODO set timestamp and mjd
+            // timestamp_ns is mjd 
             m_config->windows[i]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
-
             m_config->windows[i]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
             m_config->windows[i]->sender.send_spectrum(m_config->windows[i]->header, &slot.data[start_idx], channels * sizeof(float4));
           }
       }
       if( cfg.observation_mode == ObservationMode::CONTINUUM) {
             m_config->windows[0]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
-
             m_config->windows[0]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
-            m_config->windows[0]->sender.send_spectrum(m_config->windows[0]->header, &slot.sumPower, sizeof(double));
+            m_config->windows[0]->sender.send_spectrum(m_config->windows[0]->header, &slot.sumPower, sizeof(float));
       }
         slot.used.store(false, std::memory_order_release);
         idx = (idx + 1) % NUM_SLOTS;
@@ -530,7 +566,9 @@ public:
           m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
         }
         m_acc_on_id++;
+        if(cfg.observation_mode == ObservationMode::SPECTRAL)
         stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_ON);
+        if(cfg.observation_mode == ObservationMode::CONTINUUM)
         continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_ON);
 
         /*
@@ -544,7 +582,7 @@ public:
           if(cfg.observation_mode == ObservationMode::SPECTRAL)
           cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_ON, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
           if(cfg.observation_mode == ObservationMode::CONTINUUM)
-          cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_ON, sizeof(double), cudaMemcpyDeviceToHost, sD2H);
+          cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_ON, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
           m_hring[m_hhead].noise_state = NoiseState::ON;
 
           cudaEventRecord(m_hring[m_hhead].event, sD2H);
@@ -552,7 +590,7 @@ public:
           m_hring[m_hhead].used.store(true, std::memory_order_release);
 
           cudaMemsetAsync(m_acc_stokes_ON, 0, m_Nfft * sizeof(float4), sD2H);
-          cudaMemsetAsync(d_sumPower_ON, 0, sizeof(double), sD2H);
+          cudaMemsetAsync(d_sumPower_ON, 0, sizeof(float), sD2H);
 
           m_acc_on_id = 0;
 
@@ -569,10 +607,11 @@ public:
           m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
         }
         m_acc_off_id++;
-        {
-          stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
-          continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
-        }
+        if(cfg.observation_mode == ObservationMode::SPECTRAL)
+        stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
+        if(cfg.observation_mode == ObservationMode::CONTINUUM)
+        continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
+        
         /*
          * OFF累计时间达到积分时间
          */
@@ -585,7 +624,7 @@ public:
           if(cfg.observation_mode == ObservationMode::SPECTRAL)
           cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
           if(cfg.observation_mode == ObservationMode::CONTINUUM)
-          cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(double), cudaMemcpyDeviceToHost, sD2H);
+          cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
 
           m_hring[m_hhead].noise_state = NoiseState::OFF;
 
@@ -594,7 +633,7 @@ public:
           m_hring[m_hhead].used.store(true, std::memory_order_release);
 
           cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H);
-          cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(double), sD2H);
+          cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(float), sD2H);
 
           m_acc_off_id = 0;
 
@@ -620,13 +659,13 @@ public:
         if(cfg.observation_mode == ObservationMode::SPECTRAL)
         cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
         if(cfg.observation_mode == ObservationMode::CONTINUUM)
-        cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(double), cudaMemcpyDeviceToHost, sD2H);
+        cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
         m_hring[m_hhead].noise_state = NoiseState::OFF;
 
         cudaEventRecord(m_hring[m_hhead].event, sD2H);
         m_acc_id = 0;
         m_hring[m_hhead].used.store(true, std::memory_order_release);
-        cudaMemsetAsync(d_sumPower_OFF,0,sizeof(double),sD2H);
+        cudaMemsetAsync(d_sumPower_OFF,0,sizeof(float),sD2H);
         cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H); 
         m_hhead = (m_hhead + 1) % NUM_SLOTS;
       }
@@ -655,8 +694,8 @@ private:
   complexf *m_d_pfbedB = nullptr;
 
   // sum power for continuum
-  double *d_sumPower_ON;
-  double *d_sumPower_OFF;
+  float *d_sumPower_ON;
+  float *d_sumPower_OFF;
   // cuFFT plan
   cufftHandle m_planA = 0;
   cufftHandle m_planB = 0;
