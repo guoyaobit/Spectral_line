@@ -8,6 +8,7 @@
 #include "readerwriterqueue.h"
 #include <Globalcfg.hpp>
 #include <chrono>
+#include <fcntl.h>
 #include <iostream>
 #include <rte_common.h>
 #include <rte_cycles.h>
@@ -18,18 +19,21 @@
 #include <rte_mbuf.h>
 #include <rte_ring.h>
 #include <rte_udp.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <vdif.hpp>
 #include <vector>
-
-#define RX_RING_SIZE 4096
-#define NUM_MBUFS 262144
+#define nb_rxd_SIZE 8192
+#define NUM_MBUFS 524288
 #define MBUF_CACHE_SIZE 512
-#define BURST_SIZE 128
-#define RING_SIZE 4096
+#define BURST_SIZE 256
+#define RING_SIZE 262144
 
 auto &cfg = GlobalConfig::getInstance();
 constexpr size_t EXPECTED_PKT_LEN = 8266;
-std::vector<rte_ring *> rx_rings;
+// std::vector<rte_ring *> rx_rings;
 struct lcore_param {
   uint16_t port_id;
   uint16_t queue_id;
@@ -37,9 +41,9 @@ struct lcore_param {
   uint16_t dest_port;
   uint16_t ring_id;
 };
-static inline uint32_t simple_port_hash(uint16_t dst_port) {
-  return (uint32_t)dst_port;
-}
+// static inline uint32_t simple_port_hash(uint16_t dst_port) {
+//   return (uint32_t)dst_port;
+// }
 
 static struct rte_flow *create_udp_dst_flow(uint16_t port_id, uint16_t dst_port,
                                             uint16_t queue_id) {
@@ -126,7 +130,7 @@ static struct rte_flow *create_catch_all_drop(uint16_t port_id) {
 static int port_init(uint16_t port, struct rte_mempool *mbuf_pool,
                      uint16_t nb_rx_queues) {
 
-  uint16_t nb_rxd = RX_RING_SIZE;
+  uint16_t nb_rxd = nb_rxd_SIZE;
   int retval;
 
   struct rte_eth_dev_info dev_info;
@@ -134,11 +138,11 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool,
   struct rte_eth_conf port_conf = {0};
   port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
   port_conf.rxmode.mtu = 9000;
-  port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM |
-                               RTE_ETH_TX_OFFLOAD_UDP_CKSUM |
-                               RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
+  // port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM |
+  //                              RTE_ETH_TX_OFFLOAD_UDP_CKSUM |
+  //                              RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
 
-  retval = rte_eth_dev_configure(port, nb_rx_queues, nb_rx_queues, &port_conf);
+  retval = rte_eth_dev_configure(port, nb_rx_queues, 1, &port_conf);
   if (retval < 0)
     return retval;
 
@@ -148,10 +152,11 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool,
         port, q, nb_rxd, rte_eth_dev_socket_id(port), NULL, mbuf_pool);
     if (retval < 0)
       return retval;
-    retval = rte_eth_tx_queue_setup(port, q, nb_rxd,
-                                    rte_eth_dev_socket_id(port), NULL);
-    if (retval < 0)
-      return retval;
+    // retval =
+    //     rte_eth_tx_queue_setup(port, q, 128, rte_eth_dev_socket_id(port),
+    //     NULL);
+    // if (retval < 0)
+    //   return retval;
   }
 
   rte_eth_promiscuous_disable(port);
@@ -195,73 +200,148 @@ static int locre_drop(void *arg) {
   return 0;
 }
 // packet recving  thread
-static int lcore_recv(void *arg) {
-  struct lcore_param *param = (struct lcore_param *)arg;
-  unsigned lcore_id = rte_lcore_id();
-  uint16_t port = param->port_id;
-  uint16_t queue_id = param->queue_id;
-  struct rte_mbuf *bufs[BURST_SIZE];
-  uint16_t nb_rx;
-  uint64_t t_num = 0;
-  auto &cfg = GlobalConfig::getInstance();
-  size_t pool_idx = 0;
-  cfg.logger_->debug(
-      "Running locre_recv thread on port {} ,queue {} ,on core {}", port,
-      queue_id, lcore_id);
-  while (1) {
-    nb_rx = rte_eth_rx_burst(port, queue_id, bufs, BURST_SIZE);
-    if (nb_rx == 0)
-      continue;
+// static int lcore_recv(void *arg) {
+//   struct lcore_param *param = (struct lcore_param *)arg;
+//   unsigned lcore_id = rte_lcore_id();
+//   uint16_t port = param->port_id;
+//   uint16_t queue_id = param->queue_id;
+//   struct rte_mbuf *bufs[BURST_SIZE];
+//   uint16_t nb_rx;
+//   uint64_t t_num = 0;
+//   auto &cfg = GlobalConfig::getInstance();
+//   size_t pool_idx = 0;
+//   cfg.logger_->debug(
+//       "Running locre_recv thread on port {} ,queue {} ,on core {}", port,
+//       queue_id, lcore_id);
+//   while (1) {
+//     nb_rx = rte_eth_rx_burst(port, queue_id, bufs, BURST_SIZE);
+//     if (nb_rx == 0)
+//       continue;
 
-    for (int i = 0; i < nb_rx; i++) {
-      struct rte_mbuf *mbuf = bufs[i];
-      size_t datalen = rte_pktmbuf_pkt_len(mbuf);
-      if (datalen != EXPECTED_PKT_LEN) {
-        // printf("Droping packet data len = %d\n", datalen);
-        rte_pktmbuf_free(mbuf);
-        continue;
-      }
-      /**prase udp header */
-      struct rte_ether_hdr *eth_hdr =
-          rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
-      if (eth_hdr->ether_type != rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
-        rte_pktmbuf_free(mbuf);
-        continue;
-      }
+//     for (int i = 0; i < nb_rx; i++) {
+//       struct rte_mbuf *mbuf = bufs[i];
+//       size_t datalen = rte_pktmbuf_pkt_len(mbuf);
+//       if (datalen != EXPECTED_PKT_LEN) {
+//         // printf("Droping packet data len = %d\n", datalen);
+//         rte_pktmbuf_free(mbuf);
+//         continue;
+//       }
+//       // /**prase udp header */
+//       // struct rte_ether_hdr *eth_hdr =
+//       //     rte_pktmbuf_mtod(mbuf, struct rte_ether_hdr *);
+//       // if (eth_hdr->ether_type != rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+//       //   rte_pktmbuf_free(mbuf);
+//       //   continue;
+//       // }
 
-      struct rte_ipv4_hdr *ip_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
-      if (ip_hdr->next_proto_id != IPPROTO_UDP) {
-        rte_pktmbuf_free(mbuf);
-        continue;
-      }
+//       // struct rte_ipv4_hdr *ip_hdr = (struct rte_ipv4_hdr *)(eth_hdr + 1);
+//       // if (ip_hdr->next_proto_id != IPPROTO_UDP) {
+//       //   rte_pktmbuf_free(mbuf);
+//       //   continue;
+//       // }
 
-      struct rte_udp_hdr *udp_hdr =
-          (struct rte_udp_hdr *)((unsigned char *)ip_hdr +
-                                 sizeof(struct rte_ipv4_hdr));
-      //
-      if (rte_be_to_cpu_32(ip_hdr->dst_addr) != 0x0A11100B) {
+//       // struct rte_udp_hdr *udp_hdr =
+//       //     (struct rte_udp_hdr *)((unsigned char *)ip_hdr +
+//       //                            sizeof(struct rte_ipv4_hdr));
+//       //
+//       // if (rte_be_to_cpu_32(ip_hdr->dst_addr) != 0x0A11100B) {
 
-        rte_pktmbuf_free(mbuf);
-      }
+//       //   rte_pktmbuf_free(mbuf);
+//       // }
 
-      uint16_t dst_port = rte_be_to_cpu_16(udp_hdr->dst_port);
+//       // uint16_t dst_port = rte_be_to_cpu_16(udp_hdr->dst_port);
 
-      // if (queue_id < cfg.max_streams)
-      if (dst_port == param->dest_port) {
-        rte_ring *ring = rx_rings[param->ring_id];
-        int ret = rte_ring_enqueue(ring, mbuf);
-        if (ret < 0)
-          cfg.logger_->info("Enqueue ring is full, ring_id: {}",
-                            param->ring_id);
-      } else {
-        // printf("%d,%d\n",dst_port,param->dest_port);
-        rte_pktmbuf_free(mbuf);
-      }
-    }
-  }
-  return 0;
-}
+//       // if (queue_id < cfg.max_streams)
+//       // if (dst_port == param->dest_port) {
+//       rte_ring *ring = rx_rings[param->ring_id];
+//       int ret = rte_ring_enqueue(ring, mbuf);
+//       if (ret < 0)
+//         cfg.logger_->info("Enqueue ring is full, ring_id: {}",
+//         param->ring_id);
+//       // } else {
+//       // printf("%d,%d\n",dst_port,param->dest_port);
+//       // rte_pktmbuf_free(mbuf);
+//       // }
+//     }
+//   }
+//   return 0;
+// }
+// static int lcore_recv(void *arg) {
+//   auto *param = static_cast<lcore_param *>(arg);
 
+//   const uint16_t port = param->port_id;
+//   const uint16_t queue_id = param->queue_id;
+
+//   rte_ring *ring = rx_rings[param->ring_id];
+
+//   alignas(64) rte_mbuf *bufs[BURST_SIZE];
+
+//   uint64_t rx_packets = 0;
+//   uint64_t ring_enqueue_fail = 0;
+
+//   cfg.logger_->debug("RX: port={} queue={} ring={} core={}", port, queue_id,
+//                      param->ring_id, rte_lcore_id());
+
+//   while (likely(1)) {
+//     const uint16_t nb_rx = rte_eth_rx_burst(port, queue_id, bufs,
+//     BURST_SIZE);
+
+//     if (unlikely(nb_rx == 0))
+//       continue;
+
+//     rx_packets += nb_rx;
+
+//     const unsigned nb_enq = rte_ring_enqueue_burst(
+//         ring, reinterpret_cast<void **>(bufs), nb_rx, nullptr);
+
+//     if (unlikely(nb_enq != nb_rx)) {
+//       const unsigned failed = nb_rx - nb_enq;
+
+//       ring_enqueue_fail += failed;
+
+//       for (unsigned i = nb_enq; i < nb_rx; ++i) {
+//         rte_pktmbuf_free(bufs[i]);
+//       }
+//     }
+//   }
+
+//   return 0;
+// }
+// static int test_ring_consumer(void *arg) {
+//   auto *param = static_cast<lcore_param *>(arg);
+
+//   rte_ring *ring = rx_rings[param->ring_id];
+
+//   alignas(64) rte_mbuf *bufs[BURST_SIZE];
+
+//   uint64_t packets = 0;
+//   uint64_t max_ring = 0;
+
+//   while (1) {
+//     const unsigned n = rte_ring_dequeue_burst(
+//         ring, reinterpret_cast<void **>(bufs), BURST_SIZE, nullptr);
+
+//     if (unlikely(n == 0))
+//       continue;
+
+//     packets += n;
+
+//     const unsigned count = rte_ring_count(ring);
+//     if (count > max_ring)
+//       max_ring = count;
+
+//     /*
+//      * 模拟正常消费者：
+//      * 使用完 mbuf 后释放。
+//      */
+//     for (unsigned i = 0; i < n; ++i) {
+//       rte_pktmbuf_free(bufs[i]);
+//     }
+//   }
+
+//   return 0;
+// }
+/*
 static int recv2mem(void *args) {
   struct lcore_param *param = (struct lcore_param *)args;
   int stream_id = param->ring_id;
@@ -313,7 +393,7 @@ static int recv2mem(void *args) {
                         "{}, m_frame_number {}",
                         stream_id, m_NosieSoureState, m_seconds,
                         m_frame_number);
-      // Invalid Noise Source State,drop packets
+      rte_pktmbuf_free(mbuf);
       continue;
     }
     // if(stream_id==0)
@@ -419,6 +499,335 @@ static int recv2mem(void *args) {
     rte_pktmbuf_free(mbuf);
   }
 }
+*/
+static int recv2mem(void *args) {
+  struct lcore_param *param = (struct lcore_param *)args;
+
+  const int stream_id = param->ring_id;
+  const uint16_t port = param->port_id;
+  const uint16_t queue_id = param->queue_id;
+  // rte_ring *ring = rx_rings[stream_id];
+
+  auto &stream_cfg = cfg.streams[stream_id];
+  auto &queue = stream_cfg.queue;
+  auto &pool = stream_cfg.pool;
+
+  size_t pool_idx = 0;
+  uint64_t prebatchid = 0;
+
+  cfg.logger_->debug("Running recv2mem thread: stream id :{}, core id: {}",
+                     stream_id, rte_lcore_id());
+
+  cfg.logger_->debug("Batchsize is {}", pool[0]->pkts.size());
+
+  // 一次从 ring 中取出的 mbuf
+  rte_mbuf *bufs[BURST_SIZE];
+
+  // 本次 burst 中需要释放的 mbuf
+  rte_mbuf *free_bufs[BURST_SIZE];
+
+  uint64_t expected_pkt_id = 0;
+  uint64_t total_lostnmber = 0;
+  uint64_t total_pkts = 0;
+  const uint32_t batchsize = pool[0]->count;
+  // if (cfg.subband_monitor)
+  // {
+  std::string monitor_data_path = "/dev/shm/server_" +
+                                  std::to_string(cfg.ServerID) + "_stream_" +
+                                  std::to_string(stream_id) + ".bin";
+
+  // int fd = open(monitor_data_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
+  // 0666);
+  constexpr size_t MONITOR_SIZE = 32 + 8192;
+
+  int fd = open(monitor_data_path.c_str(), O_RDWR | O_CREAT, 0666);
+
+  if (fd < 0) {
+    perror("open monitor file");
+    return -1;
+  }
+
+  if (ftruncate(fd, MONITOR_SIZE) != 0) {
+    perror("ftruncate monitor file");
+    close(fd);
+    return -1;
+  }
+
+  void *monitor_map =
+      mmap(nullptr, MONITOR_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+  if (monitor_map == MAP_FAILED) {
+    perror("mmap monitor file");
+    close(fd);
+    return -1;
+  }
+
+  auto *monitor_ptr = static_cast<uint8_t *>(monitor_map);
+  // }
+  while (1) {
+    /*
+     * =========================================================
+     * 1. 批量从 ring 中取 packet
+     * =========================================================
+     */
+    // const unsigned int nb_rx = rte_ring_dequeue_burst(
+    //     ring, reinterpret_cast<void **>(bufs), BURST_SIZE, nullptr);
+    // if (unlikely(nb_rx == 0))
+    //   continue;
+    const uint16_t nb_rx = rte_eth_rx_burst(port, queue_id, bufs, BURST_SIZE);
+
+    if (unlikely(nb_rx == 0))
+      continue;
+    unsigned int nb_free = 0;
+
+    /*
+     * =========================================================
+     * 2. 批量处理 packet
+     * =========================================================
+     */
+    for (unsigned int i = 0; i < nb_rx; ++i) {
+      rte_mbuf *mbuf = bufs[i];
+      size_t datalen = rte_pktmbuf_pkt_len(mbuf);
+      if (datalen != EXPECTED_PKT_LEN) {
+        // printf("Droping packet data len = %d\n", datalen);
+        rte_pktmbuf_free(mbuf);
+        continue;
+      }
+
+      /*
+       * 预取后面的 packet。
+       *
+       * 当前处理 i，
+       * 提前把 i+4 的 mbuf 数据放入 cache。
+       */
+      if (i + 4 < nb_rx) {
+        rte_prefetch0(rte_pktmbuf_mtod(bufs[i + 4], void *));
+      }
+
+      total_pkts++;
+
+      /*
+       * =====================================================
+       * VDIF header
+       * =====================================================
+       */
+      VDIF header;
+
+      uint8_t *data = rte_pktmbuf_mtod(mbuf, uint8_t *);
+
+      // Ethernet 14 + IPv4 20 + UDP 8 = 42
+      uint8_t *vdif_ptr = data + 42;
+      rte_memcpy(header.headerPtr(), vdif_ptr, 32);
+
+      /*
+       * 修改 VDIF header
+       */
+      header.setEDV(1);
+      header.setComplex(true);
+      header.setBitsPerSample(8);
+      header.setLog2Channels(0);
+      header.setVDIFVersion(1);
+      header.setThreadID(cfg.ServerID * 16 + stream_id);
+
+      /*
+       * =====================================================
+       * VDIF metadata
+       * =====================================================
+       */
+      const uint64_t m_seconds = header.getSecondsFromEpoch();
+      const uint64_t m_frame_number = header.getFrameNumber();
+      const uint32_t m_NosieSoureState = header.getNoiseSourceState();
+
+      /*
+       * =====================================================
+       * Noise source state
+       * =====================================================
+       */
+      // if (unlikely(m_NosieSoureState != 0 && m_NosieSoureState != 1)) {
+      //   cfg.logger_->warn("Stream {}: Invalid Noise Source State: {}, "
+      //                     "m_seconds {}, m_frame_number {}",
+      //                     stream_id, m_NosieSoureState, m_seconds,
+      //                     m_frame_number);
+
+      //   free_bufs[nb_free++] = mbuf;
+      //   continue;
+      // }
+
+      /*
+       * =====================================================
+       * subband monitor
+       * =====================================================
+       */
+      if (unlikely(cfg.subband_monitor && m_seconds % 2 == 0 &&
+                   m_frame_number == 0)) {
+        rte_memcpy(monitor_ptr, vdif_ptr, 8224);
+      }
+
+      /*
+       * =====================================================
+       * packet ID
+       * =====================================================
+       */
+      const uint64_t recv_packet_id = m_seconds * 62500ULL + m_frame_number;
+
+      /*
+       * =====================================================
+       * batch ID
+       * =====================================================
+       */
+      const uint64_t batchid = recv_packet_id / batchsize;
+
+      const uint32_t pkt_idx_inbatch = recv_packet_id % batchsize;
+
+      /*
+       * =====================================================
+       * packet sequence check
+       * =====================================================
+       *
+       * 保持你原来的逻辑：
+       *
+       * expected == 0
+       *     第一个 packet
+       *
+       * expected == recv
+       *     正常
+       *
+       * expected != recv
+       *     认为发生丢包
+       */
+      if (expected_pkt_id == 0) {
+        if (unlikely(pkt_idx_inbatch != 0)) {
+          free_bufs[nb_free++] = mbuf;
+          continue;
+        }
+        expected_pkt_id = recv_packet_id;
+        cfg.logger_->info("First packet_id is {} ,on stream {}, seconds is {}, "
+                          "framenumber is {}",
+                          expected_pkt_id, stream_id, m_seconds,
+                          m_frame_number);
+
+        // cfg.logger_->info("First expected_pkt_id is {} ,on stream {}",
+        //                   expected_pkt_id, stream_id);
+        expected_pkt_id++;
+        prebatchid = batchid;
+      } else {
+        if (unlikely(expected_pkt_id != recv_packet_id)) {
+          const int64_t lostnmber =
+              static_cast<int64_t>(recv_packet_id - expected_pkt_id);
+
+          /*
+           * 这里保留你的原逻辑。
+           */
+          total_lostnmber += lostnmber;
+
+          cfg.logger_->warn("Stream {}:total_lostnmber {}, "
+                            "m_seconds {}, m_frame_number {}, "
+                            "recv_packet_id:{} , "
+                            "expected_pkt_id: {} ,lost {} packets",
+                            stream_id, total_lostnmber, m_seconds,
+                            m_frame_number, recv_packet_id, expected_pkt_id,
+                            lostnmber);
+
+          expected_pkt_id = recv_packet_id + 1;
+
+          if (cfg.Debug_mode) {
+            double loss_rate =
+                static_cast<double>(total_lostnmber) /
+                static_cast<double>(total_lostnmber + total_pkts);
+
+            std::time_t t = std::time(nullptr);
+
+            std::cout << std::ctime(&t) << "stream: " << stream_id
+                      << " lost: " << lostnmber
+                      << " total_lost: " << total_lostnmber
+                      << " total received: " << total_pkts
+                      << " loss_rate: " << std::scientific
+                      << std::setprecision(2) << loss_rate << std::endl;
+          }
+        } else {
+          expected_pkt_id++;
+        }
+      }
+      /*
+       * =====================================================
+       * 获取当前 batch
+       * =====================================================
+       */
+      PacketBatch *batch = pool[pool_idx];
+      /*
+       * =====================================================
+       * batch 切换
+       * =====================================================
+       */
+      if (unlikely(batchid != prebatchid)) {
+        while (prebatchid < batchid) {
+          /*
+           * 当前 batch 入队
+           */
+          batch = pool[pool_idx];
+
+          if (unlikely(!queue.try_enqueue(batch))) {
+            cfg.logger_->error("Pktdata to Queue {} "
+                               "is full and overwrite",
+                               stream_id);
+          }
+
+          prebatchid++;
+
+          /*
+           * 切换到下一个 batch
+           */
+          pool_idx++;
+
+          if (pool_idx >= pool.size())
+            pool_idx = 0;
+
+          batch = pool[pool_idx];
+
+          batch->valid = true;
+        }
+      }
+
+      /*
+       * =====================================================
+       * 写入 packet
+       * =====================================================
+       */
+      Packet *pkt = batch->pkts[pkt_idx_inbatch];
+      batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
+      batch->noise_state[pkt_idx_inbatch] = m_NosieSoureState;
+      batch->hdrs[pkt_idx_inbatch] = header;
+
+      /*
+       * VDIF payload
+       *
+       * mbuf:
+       *
+       * 42 bytes Ethernet/IP/UDP
+       * 32 bytes VDIF header
+       * 8192 bytes payload
+       */
+      rte_memcpy(pkt->payload, vdif_ptr + 32, 8192);
+
+      /*
+       * 不立即 free。
+       * 放入 bulk free list。
+       */
+      free_bufs[nb_free++] = mbuf;
+    }
+
+    /*
+     * =========================================================
+     * 3. 批量释放 mbuf
+     * =========================================================
+     */
+    if (nb_free != 0) {
+      rte_pktmbuf_free_bulk(free_bufs, nb_free);
+    }
+  }
+
+  return 0;
+}
 // 获取指定网卡的端口号
 inline int get_port_by_name(const std::string &name) {
   uint16_t nb_ports = rte_eth_dev_count_avail();
@@ -433,12 +842,11 @@ inline int get_port_by_name(const std::string &name) {
 }
 std::vector<lcore_param>
 generate_lcore_params(const std::vector<uint16_t> &port_ids,
-                      uint16_t queues_per_port, uint16_t start_dest_port,
-                      bool include_lcore0 = false) {
+                      uint16_t queues_per_port, uint16_t start_dest_port) {
   std::vector<lcore_param> params;
-  std::vector<unsigned> next_lcore(RTE_MAX_NUMA_NODES, include_lcore0 ? 0 : 1);
-
+  std::vector<unsigned> next_lcore(RTE_MAX_NUMA_NODES, 1);
   std::vector<unsigned> enabled_lcores;
+
   unsigned lcore_id;
   RTE_LCORE_FOREACH(lcore_id) { enabled_lcores.push_back(lcore_id); }
 
@@ -515,16 +923,18 @@ int dpdk() {
   // init rings one subband to one ring
   auto &cfg = GlobalConfig::getInstance();
   // rx_rings.resize(cfg.max_streams, nullptr);
-  rx_rings.resize(cfg.max_streams, nullptr);
-  for (int i = 0; i < cfg.max_streams; i++) {
-    char ring_name[32];
-    snprintf(ring_name, sizeof(ring_name), "rx_ring_%d", i);
-    rx_rings[i] = rte_ring_create(ring_name, RING_SIZE, SOCKET_ID_ANY, 0);
-    if (rx_rings[i] == NULL) {
-      rte_exit(EXIT_FAILURE, "Failed to create ring %s: %s\n", ring_name,
-               rte_strerror(rte_errno));
-    }
-  }
+  // rx_rings.resize(cfg.max_streams, nullptr);
+  // unsigned socket = rte_eth_dev_socket_id(0);
+  // for (int i = 0; i < cfg.max_streams; i++) {
+  //   char ring_name[32];
+  //   snprintf(ring_name, sizeof(ring_name), "rx_ring_%d", i);
+  //   rx_rings[i] = rte_ring_create(ring_name, RING_SIZE, socket,
+  //                                 RING_F_SP_ENQ | RING_F_SC_DEQ);
+  //   if (rx_rings[i] == NULL) {
+  //     rte_exit(EXIT_FAILURE, "Failed to create ring %s: %s\n", ring_name,
+  //              rte_strerror(rte_errno));
+  //   }
+  // }
   // TODO magic number
   uint16_t queues_per_port = 8;
   uint16_t start_dest_port = 60000;
@@ -544,11 +954,15 @@ int dpdk() {
   for (int i = 0; i < lcore_params.size(); ++i) {
     int subband_index = i / 2; // 每两个队列对应一个 subband
     if (cfg.subbands[subband_index]->enable) {
-      rx_threads += 2;
-      rte_eal_remote_launch(lcore_recv, &lcore_params[i],
-                            lcore_params[i].lcore_id);
+      // rx_threads += 2;
       rte_eal_remote_launch(recv2mem, &lcore_params[i],
-                            lcore_params[i].lcore_id + lcore_params.size());
+                            lcore_params[i].lcore_id);
+      // rte_eal_remote_launch(lcore_recv, &lcore_params[i],
+      //                       lcore_params[i].lcore_id);
+      // rte_eal_remote_launch(recv2mem, &lcore_params[i],
+      //                       lcore_params[i].lcore_id + lcore_params.size());
+      // rte_eal_remote_launch(test_ring_consumer, &lcore_params[i],
+      //                       lcore_params[i].lcore_id + lcore_params.size());
     } else {
       rte_eal_remote_launch(locre_drop, &lcore_params[i],
                             lcore_params[i].lcore_id);

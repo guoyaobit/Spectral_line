@@ -252,10 +252,20 @@ int init() {
                       cfg.subbands[i]->gpu_id);
 
     std::thread t(subband_thread, i);
-
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    unsigned cpu_id = cfg.max_streams + 1 + i;
+    CPU_SET(cpu_id, &cpuset);
+    pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
+    cfg.logger_->info("subband {}: thread pinned to CPU {}", i, cpu_id);
     t.detach();
   }
   // 5.
-  system("find /dev/shm -mindepth 1 -delete");
+  for (int stream_id = 0; stream_id < cfg.max_streams; ++stream_id) {
+    std::string path = "/dev/shm/server_" + std::to_string(cfg.ServerID) +
+                       "_stream_" + std::to_string(stream_id) + ".bin";
+
+    unlink(path.c_str());
+  }
   return 0;
 }
