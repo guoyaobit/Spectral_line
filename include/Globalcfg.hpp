@@ -6,6 +6,7 @@
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/spdlog.h"
 #include <SpectrumSender.hpp>
+#include <cmath>
 #include <condition_variable>
 #include <filesystem>
 #include <iomanip>
@@ -252,8 +253,9 @@ public:
       if (config["subband_monitor"])
         subband_monitor = config["subband_monitor"].as<bool>();
       if (config["win_bw"])
-        win_bw = config["win_bw"].as<float>();
-      // std::cout<< win_bw<<std::endl;
+          win_bw = config["win_bw"].as<float>();
+        if (!std::isfinite(win_bw) || win_bw <= 0.0f)
+          throw std::runtime_error("win_bw must be finite and > 0");
       if (config["win_channels"])
         win_channels = config["win_channels"].as<int>();
       // get total nfft from para
@@ -324,11 +326,10 @@ public:
           if (w->start_freq < sb->start_freq) {
             throw std::runtime_error("Window start fre < subband start fre!");
           }
-          // w->end_freq = w->center_freq + win_bw / 2;
-          // if (w->end_freq > sb->end_freq)
-          // {
-          //     throw std::runtime_error("Window end fre > subband end fre!");
-          // }
+          const float end_freq = w->center_freq + win_bw / 2;
+          if (end_freq > sb->end_freq) {
+            throw std::runtime_error("Window end freq > subband end freq!");
+          }
 
           w->start_idx =
               round(w->start_freq - sb->start_freq) / sb->BW * total_nfft;
@@ -361,13 +362,13 @@ public:
         }
 
         if (sb->windows.size() > 4) {
-          logger_->error("每个子带最多只能配置 4 个窗口!");
+          throw std::runtime_error("Each subband supports at most 4 windows");
         }
         subbands.push_back(sb);
       }
       // return true;
-    } catch (const YAML::Exception &e) {
-      logger_->error("YAML 配置解析失败: ", e.what());
+    } catch (const std::exception &e) {
+      logger_->error("Configuration parsing failed: {}", e.what());
       return false;
     }
     return checkConfig();
