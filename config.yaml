@@ -1,9 +1,9 @@
-Debug: true
+Debug: false
 # 0~7 influence result filename
 ServerID: 0
 # don't make the memory pool size > 128GB
 Memory_pool_per_stream: 8 # GB
-observation_mode: 0 # 观测模式 0 : baseband 1: spcetrum
+observation_mode: 1 # 观测模式 0 : baseband 1: spcetrum
 cal_mode: false
 noise_source:
   period_ms: 1000
@@ -66,32 +66,32 @@ subbands:
   # recv dest port from FPGA is  60006,60007
   - gpu_id: 2
     enable: true
-    start_freq: 0
-    end_freq: 256e6
+    start_freq: 1408e6
+    end_freq: 1664e6
     port: 60004
     windows:
-      - center_freq: 128e6
+      - center_freq: 1536e6
 
   - gpu_id: 2
     enable: true
-    start_freq: 0
-    end_freq: 256e6
+    start_freq: 1664e6
+    end_freq: 1920e6
     port: 60005
     windows:
-      - center_freq: 128e6
+      - center_freq: 1792e6
 
   - gpu_id: 3
     enable: true
-    start_freq: 0
-    end_freq: 256e6
+    start_freq: 1920e6
+    end_freq: 2176e6
     port: 60006
     windows:
-      - center_freq: 128e6
+      - center_freq: 2048e6
 
   - gpu_id: 3
     enable: true
-    start_freq: 0
-    end_freq: 256e6
+    start_freq: 2176e6
+    end_freq: 2432e6
     port: 60007
     windows:
-      - center_freq: 128e6
+      - center_freq: 2304e6

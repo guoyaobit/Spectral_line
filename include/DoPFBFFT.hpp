@@ -510,10 +510,12 @@ public:
         
     }
 
-    cudaMemcpyAsync(m_rawA, readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA);
-    cudaEventRecord(evtH2DA_done, sH2DA);
-    cudaMemcpyAsync(m_rawB, readblockB->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DB);
-    cudaEventRecord(evtH2DB_done, sH2DB);
+    CUDA_CHECK(cudaMemcpyAsync(m_rawA, readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA));
+    CUDA_CHECK(cudaEventRecord(evtH2DA_done, sH2DA));
+    CUDA_CHECK(cudaMemcpyAsync(m_rawB, readblockB->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DB));
+    CUDA_CHECK(cudaEventRecord(evtH2DB_done, sH2DB));
+    CUDA_CHECK(cudaEventSynchronize(evtH2DA_done));
+    CUDA_CHECK(cudaEventSynchronize(evtH2DB_done));
     // TODO check A AND B sync state
     // printf("got one block data on gpu");
     return true;
@@ -524,6 +526,7 @@ public:
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
     cudaStreamWaitEvent(sConvA, evtH2DA_done, 0);
+    cudaStreamWaitEvent(sConvB, evtH2DB_done, 0);
     //int8 -> complexf input: m_rawA, m_rawB output: m_d_inputA, m_d_inputB
     uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvA>>>(m_rawA, m_d_inputA, m_Nfft, m_pfb_head, m_pfb_ringsize);
     cudaEventRecord(evtConvA_done, sConvA);

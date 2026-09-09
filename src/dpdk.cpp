@@ -132,10 +132,7 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool,
 
   uint16_t nb_rxd = nb_rxd_SIZE;
   int retval;
-
-  struct rte_eth_dev_info dev_info;
-  rte_eth_dev_info_get(port, &dev_info);
-  struct rte_eth_conf port_conf = {0};
+  struct rte_eth_conf port_conf{};
   port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
   port_conf.rxmode.mtu = 9000;
   // port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM |
@@ -769,10 +766,9 @@ static int recv2mem(void *args) {
           batch = pool[pool_idx];
 
           if (unlikely(!queue.try_enqueue(batch))) {
-            cfg.logger_->error("Pktdata to Queue {} "
-                               "is full and overwrite",
-                               stream_id);
-          }
+              cfg.logger_->warn("Pktdata queue {} is full; applying backpressure", stream_id);
+              queue.wait_enqueue(batch);
+            }
 
           prebatchid++;
 
@@ -906,14 +902,11 @@ generate_lcore_params(const std::vector<uint16_t> &port_ids,
   return params;
 }
 int dpdk() {
-  char *argv[] = {"7mm_recv", // name
-                  "-n", "4",  // Mem_channels
-                  // "--",
-                  // "-p","0x3",
-                  NULL};
-  int argc = sizeof(argv) / sizeof(argv[0]) - 1;
-
-  unsigned lcore_id;
+  char arg0[] = "7mm_recv";
+    char arg1[] = "-n";
+    char arg2[] = "4";
+    char *argv[] = {arg0, arg1, arg2, nullptr};
+    const int argc = static_cast<int>(sizeof(argv) / sizeof(argv[0])) - 1;
   int ret = rte_eal_init(argc, argv);
   if (ret < 0)
     rte_exit(EXIT_FAILURE, "Error with EAL init\n");
@@ -951,10 +944,8 @@ int dpdk() {
   // init port config
   auto lcore_params =
       generate_lcore_params(ports, queues_per_port, start_dest_port);
-  int lastcore_id;
-  int rx_threads = 0;
-  for (int i = 0; i < lcore_params.size(); ++i) {
-    int subband_index = i / 2; // 每两个队列对应一个 subband
+  for (size_t i = 0; i < lcore_params.size(); ++i) {
+      const size_t subband_index = i / 2; // 每两个队列对应一个 subband
     if (cfg.subbands[subband_index]->enable) {
       // rx_threads += 2;
       rte_eal_remote_launch(recv2mem, &lcore_params[i],
