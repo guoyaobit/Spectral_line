@@ -77,6 +77,7 @@ public:
   std::shared_ptr<spdlog::logger> logger_;
   std::mutex init_mutex;
   std::condition_variable init_cv;
+  std::string receiver_name = "7mm";
 
   size_t ready_threads = 0;
   size_t total_threads = 0;

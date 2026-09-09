@@ -2,6 +2,9 @@
 #include <Globalcfg.hpp>
 #include <cuda_runtime.h>
 #include <iostream>
+#include <malloc.h>   // for aligned_alloc
+#include <sys/mman.h> // for mlock, madvise
+#include <unistd.h>   // for sysconf
 // #include <GpuStokes.h>
 #include <baseband.hpp>
 #include <complex>
@@ -106,19 +109,20 @@ void subband_thread(int subband_id) {
   cfg.init_cv.notify_all();
   cfg.logger_->info("subband {} ready {}/{}", subband_id, cfg.ready_threads,
                     cfg.total_threads);
-  if (cfg.observation_mode == ObservationMode::BASEBAND) // baseband mode
-  {
-    cfg.logger_->info("subband {}: baseband mode, no PFB window generated",
-                      subband_id);
-    std::unique_ptr<baseband> baseband_obj =
-        std::make_unique<baseband>(subband_id);
-    while (true) {
-      baseband_obj->recoder();
-    }
-  } else if (cfg.observation_mode == ObservationMode::SPECTRAL or
-             cfg.observation_mode ==
-                 ObservationMode::CONTINUUM) // spectrum line mode and continuum
-                                             // mode
+  // if (cfg.observation_mode == ObservationMode::BASEBAND) // baseband mode
+  // {
+  //   cfg.logger_->info("subband {}: baseband mode, no PFB window generated",
+  //                     subband_id);
+  //   std::unique_ptr<baseband> baseband_obj =
+  //       std::make_unique<baseband>(subband_id);
+  //   while (true) {
+  //     baseband_obj->recoder();
+  //   }
+  // } else if (cfg.observation_mode == ObservationMode::SPECTRAL or
+  //            cfg.observation_mode ==
+  //                ObservationMode::CONTINUUM) // spectrum line mode and
+  //                continuum
+  //                                            // mode
   {
     cfg.logger_->info("subband {}: spectrum line mode, PFB window generated",
                       subband_id);
@@ -136,7 +140,20 @@ void subband_thread(int subband_id) {
     }
   }
 }
-
+void baseband_thread(int streamid) {
+  auto &cfg = GlobalConfig::getInstance();
+  std::unique_ptr<baseband> baseband_obj = std::make_unique<baseband>(streamid);
+  {
+    std::lock_guard<std::mutex> lock(cfg.init_mutex);
+    cfg.ready_threads++;
+  }
+  cfg.init_cv.notify_all();
+  cfg.logger_->info("BASEBAND {}: ready {}/{}", streamid, cfg.ready_threads,
+                    cfg.total_threads);
+  while (true) {
+    baseband_obj->recoder();
+  }
+}
 size_t calc_pool_size() {
 
   auto &cfg = GlobalConfig::getInstance();
@@ -157,7 +174,10 @@ int init() {
 
     enabled_subbands++;
   }
-  cfg.total_threads = enabled_subbands;
+  if (cfg.observation_mode == ObservationMode::BASEBAND) {
+    cfg.total_threads = enabled_subbands * 2;
+  } else
+    cfg.total_threads = enabled_subbands;
 
   cfg.QUEUE_CAPACITY = calc_pool_size();
 
@@ -214,10 +234,20 @@ int init() {
       throw std::runtime_error(cudaGetErrorString(err));
     }
   } else {
-    cfg.packet_pool = static_cast<Packet *>(malloc(total_bytes));
+    // cfg.packet_pool = static_cast<Packet *>(malloc(total_bytes));
 
+    // if (cfg.packet_pool == nullptr) {
+    //   throw std::runtime_error("malloc packet_pool failed");
+    // }
+    // 1.
+    cfg.packet_pool = static_cast<Packet *>(aligned_alloc(64, total_bytes));
     if (cfg.packet_pool == nullptr) {
-      throw std::runtime_error("malloc packet_pool failed");
+      throw std::runtime_error("aligned_alloc failed");
+    }
+    // 2.
+    if (mlock(cfg.packet_pool, total_bytes) != 0) {
+      std::cerr << "Warning: mlock failed, performance may degrade"
+                << std::endl;
     }
   }
   memset(cfg.packet_pool, 0, total_bytes);
@@ -243,23 +273,61 @@ int init() {
   }
 
   // 4. 启动子带线程
-  for (size_t i = 0; i < cfg.subbands.size(); ++i) {
-    if (!cfg.subbands[i]->enable) {
-      cfg.logger_->info("subband {} is disabled, skip it.", i);
-      continue;
+  if (cfg.observation_mode == ObservationMode::BASEBAND) {
+    for (int i = 0; i < cfg.max_streams; ++i) {
+      int subband_id = i / 2;
+      if (!cfg.subbands[subband_id]->enable) {
+        cfg.logger_->info("subband {} is disabled, skip stream {}.", subband_id,
+                          i);
+        continue;
+      }
+      std::thread t(baseband_thread, i);
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+      unsigned cpu_id = cfg.max_streams + 1 + i;
+      CPU_SET(cpu_id, &cpuset);
+      pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
+      cfg.logger_->info("BASEBAND {}: thread pinned to CPU {}", i, cpu_id);
+      t.detach();
     }
-    cfg.logger_->info("subband {}: starting thread on GPU {}", i,
-                      cfg.subbands[i]->gpu_id);
+  } else {
+    for (size_t i = 0; i < cfg.subbands.size(); ++i) {
+      if (!cfg.subbands[i]->enable) {
+        cfg.logger_->info("subband {} is disabled, skip it.", i);
+        continue;
+      }
+      cfg.logger_->info("subband {}: starting thread on GPU {}", i,
+                        cfg.subbands[i]->gpu_id);
 
-    std::thread t(subband_thread, i);
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    unsigned cpu_id = cfg.max_streams + 1 + i;
-    CPU_SET(cpu_id, &cpuset);
-    pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
-    cfg.logger_->info("subband {}: thread pinned to CPU {}", i, cpu_id);
-    t.detach();
+      std::thread t(subband_thread, i);
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+      unsigned cpu_id = cfg.max_streams + 1 + i;
+      CPU_SET(cpu_id, &cpuset);
+      pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
+      cfg.logger_->info("subband {}: thread pinned to CPU {}", i, cpu_id);
+      t.detach();
+    }
   }
+
+  // // 4. 启动子带线程
+  // for (size_t i = 0; i < cfg.subbands.size(); ++i) {
+  //   if (!cfg.subbands[i]->enable) {
+  //     cfg.logger_->info("subband {} is disabled, skip it.", i);
+  //     continue;
+  //   }
+  //   cfg.logger_->info("subband {}: starting thread on GPU {}", i,
+  //                     cfg.subbands[i]->gpu_id);
+
+  //   std::thread t(subband_thread, i);
+  //   cpu_set_t cpuset;
+  //   CPU_ZERO(&cpuset);
+  //   unsigned cpu_id = cfg.max_streams + 1 + i;
+  //   CPU_SET(cpu_id, &cpuset);
+  //   pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
+  //   cfg.logger_->info("subband {}: thread pinned to CPU {}", i, cpu_id);
+  //   t.detach();
+  // }
   // 5.
   for (int stream_id = 0; stream_id < cfg.max_streams; ++stream_id) {
     std::string path = "/dev/shm/server_" + std::to_string(cfg.ServerID) +

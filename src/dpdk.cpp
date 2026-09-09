@@ -622,13 +622,15 @@ static int recv2mem(void *args) {
       /*
        * 修改 VDIF header
        */
-      header.setEDV(1);
-      header.setComplex(true);
-      header.setBitsPerSample(8);
-      header.setLog2Channels(0);
-      header.setVDIFVersion(1);
-      header.setThreadID(cfg.ServerID * 16 + stream_id);
-
+      if (cfg.observation_mode == ObservationMode::BASEBAND) {
+        header.setEDV(1);
+        header.setFrameLength(8192 * 8 / cfg.Baseband_bits);
+        header.setComplex(true);
+        header.setBitsPerSample(cfg.Baseband_bits);
+        header.setLog2Channels(0);
+        header.setVDIFVersion(1);
+        header.setThreadID(cfg.ServerID * 16 + stream_id);
+      }
       /*
        * =====================================================
        * VDIF metadata

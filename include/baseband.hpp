@@ -20,12 +20,13 @@
 class baseband
 {
 private:
+    int m_stream_id;
     int m_subband_id;
-    moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueA;
-    moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueB;
-    int fd_x = -1;
-    int fd_y = -1;
-    static constexpr uint64_t DEFAULT_MAX_FILE_SIZE = 32ULL * 1024 * 1024 * 1024; // 4 GB
+    moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queue;
+    // moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueB;
+    int fd = -1;
+    // int fd_y = -1;
+    static constexpr uint64_t DEFAULT_MAX_FILE_SIZE = 8ULL * 1024 * 1024 * 1024; // 4 GB
     uint64_t max_file_size = DEFAULT_MAX_FILE_SIZE;
     uint64_t current_size = 0;
     uint32_t file_index = 0;
@@ -33,22 +34,23 @@ private:
 
     static constexpr size_t FRAME_PAYLOAD = 8192;
     uint8_t vdif_payloadA[FRAME_PAYLOAD];
-    uint8_t vdif_payloadB[FRAME_PAYLOAD];
+    // uint8_t vdif_payloadB[FRAME_PAYLOAD];
     static constexpr size_t HEADER_SIZE = 32;
+    std::array<iovec, 1024> iov;
 
     // create_file: returns 0 on success, -1 on error
     int create_file()
     {
-        if (fd_x >= 0)
+        if (fd >= 0)
         {
-            ::close(fd_x);
-            fd_x = -1;
+            ::close(fd);
+            fd = -1;
         }
-        if (fd_y >= 0)
-        {
-            ::close(fd_x);
-            fd_x = -1;
-        }
+        // if (fd_y >= 0)
+        // {
+        //     ::close(fd);
+        //     fd = -1;
+        // }
         current_size = 0;
 
         std::filesystem::path folder(m_folder);
@@ -61,53 +63,74 @@ private:
             cfg.logger_->error("baseband: create_directories({}) failed: {}", folder.string(), ec.message());
             return -1;
         }
-        const auto &subband = *cfg.subbands[m_subband_id];
+        // const auto &subband = *cfg.subbands[m_subband_id];
 
-        char basename_x[256];
-        char basename_y[256];
+        char basename[256];
+        // char basename_y[256];
 
         const unsigned int current_file_index = file_index++;
+        const char *pol = (m_stream_id % 2 == 0) ? "X" : "Y";
 
-        if (std::snprintf(basename_x,
-                        sizeof(basename_x),
-                        "%uM-%uM_X_%04u.vdif",
-                        static_cast<unsigned int>(subband.start_freq / 1e6f),
-                        static_cast<unsigned int>(subband.end_freq / 1e6f),
-                        current_file_index) < 0)
+        const time_t now = static_cast<time_t>(std::time(nullptr));
+
+        struct tm utc_tm {};
+        gmtime_r(&now, &utc_tm);
+
+        char utc_date[16];
+        char utc_time[16];
+
+        std::strftime(utc_date, sizeof(utc_date),
+                    "%Y-%m-%d", &utc_tm);
+
+        std::strftime(utc_time, sizeof(utc_time),
+                    "%H:%M:%S", &utc_tm);
+
+        if (std::snprintf(
+                basename,
+                sizeof(basename),
+                "%s_%s_%s_b%02u_%s_t%04u.vdif",
+                cfg.receiver_name.c_str(),
+                utc_date,
+                utc_time,
+                static_cast<unsigned int>(m_subband_id+cfg.ServerID*8),
+                pol,
+                current_file_index) < 0)
         {
-            GlobalConfig::getInstance().logger_->error(
-                "baseband: snprintf failed for Y polarization filename");
+            cfg.logger_->error(
+                "baseband: snprintf failed for {} polarization filename",
+                pol);
             return -1;
         }
 
-        if (std::snprintf(basename_y,
-                        sizeof(basename_y),
-                        "%uM-%uM_Y_%04u.vdif",
-                        static_cast<unsigned int>(subband.start_freq / 1e6f),
-                        static_cast<unsigned int>(subband.end_freq / 1e6f),
-                        current_file_index) < 0)
-        {
-            GlobalConfig::getInstance().logger_->error(
-                "baseband: snprintf failed for Y polarization filename");
-            return -1;
-        }
 
-        std::filesystem::path filepath = folder / basename_x;
-        fd_x = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd_x < 0)
+        // if (std::snprintf(basename_y,
+        //                 sizeof(basename_y),
+        //                 "%uM-%uM_Y_%04u.vdif",
+        //                 static_cast<unsigned int>(subband.start_freq / 1e6f),
+        //                 static_cast<unsigned int>(subband.end_freq / 1e6f),
+        //                 current_file_index) < 0)
+        // {
+        //     GlobalConfig::getInstance().logger_->error(
+        //         "baseband: snprintf failed for Y polarization filename");
+        //     return -1;
+        // }
+
+        std::filesystem::path filepath = folder / basename;
+        fd = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd < 0)
         {
             auto &cfg = GlobalConfig::getInstance();
             cfg.logger_->error("baseband: open('{}') failed: {} (errno={})", filepath.string(), std::strerror(errno), errno);
             return -1;
         }
-        filepath = folder / basename_y;
-        fd_y = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd_y < 0)
-        {
-            auto &cfg = GlobalConfig::getInstance();
-            cfg.logger_->error("baseband: open('{}') failed: {} (errno={})", filepath.string(), std::strerror(errno), errno);
-            return -1;
-        }
+        // filepath = folder / basename_y;
+        // fd_y = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        // if (fd_y < 0)
+        // {
+        //     auto &cfg = GlobalConfig::getInstance();
+        //     cfg.logger_->error("baseband: open('{}') failed: {} (errno={})", filepath.string(), std::strerror(errno), errno);
+        //     return -1;
+        // }
         return 0;
     }
 
@@ -176,126 +199,66 @@ public:
             in += 2;
         }
     }
-    // recoder handles errors locally (logs + returns) rather than throwing
     void recoder()
     {
         auto &cfg = GlobalConfig::getInstance();
-        PacketBatch *readblockA = nullptr;
-        PacketBatch *readblockB = nullptr;
-        m_queueA->wait_dequeue(readblockA);
-        m_queueB->wait_dequeue(readblockB);
-
-        if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95)
-            cfg.logger_->debug("BaseBand: Buffered {} batch in queue, >95%%", m_queueA->size_approx());
-
-        // determine how many frames to write: use actual count (A and B should be equal; use minCount)
-        int frames_to_write = readblockA->count;
-
-        // // TODO
-        // if (cfg.Baseband_bits == 4)
-        // {
-        //     if (current_size > max_file_size)
-        //     {
-        //         if (create_file() != 0)
-        //         {
-        //             cfg.logger_->error("baseband: create_file failed during rotation");
-        //             return;
-        //         }
-        //     }
-        //     constexpr int MAX_FRAMES_PER_WRITEV = 256;
-
-        //     iovec iov[MAX_FRAMES_PER_WRITEV * 4];
-
-        //     for (int base = 0; base < frames_to_write;)
-        //     {
-        //         int batch = std::min(
-        //             MAX_FRAMES_PER_WRITEV,
-        //             frames_to_write - base);
-
-        //         int idx = 0;
-
-        //         for (int i = 0; i < batch; i++)
-        //         {
-        //             int frame = base + i;
-
-        //             quantize4_avx512(
-        //                 readblockA->pkts[frame]->payload,
-        //                 FRAME_PAYLOAD);
-
-        //             quantize4_avx512(
-        //                 readblockB->pkts[frame]->payload,
-        //                 FRAME_PAYLOAD);
-        //             iov[idx++] = {
-        //                 &readblockA->hdrs[frame],
-        //                 HEADER_SIZE
-        //             };
-        //             iov[idx++] = {
-        //                 readblockA->pkts[frame]->payload,
-        //                 FRAME_PAYLOAD / 2
-        //             };
-        //             iov[idx++] = {
-        //                 &readblockB->hdrs[frame],
-        //                 HEADER_SIZE
-        //             };
-        //             iov[idx++] = {
-        //                 readblockB->pkts[frame]->payload,
-        //                 FRAME_PAYLOAD / 2
-        //             };
-        //         }
-        //         ssize_t ret = writev(fd_x, iov, idx);
-        //         size_t expected =
-        //             batch *
-        //             (2 * HEADER_SIZE + FRAME_PAYLOAD);
-
-        //         if (ret != expected)
-        //         {
-        //             cfg.logger_->error(
-        //                 "writev incomplete {} / {}",
-        //                 ret,
-        //                 expected);
-        //             return;
-        //         }
-
-
-        //         base += batch;
-        //     }
-        //     return;
-        // }
-        uint64_t bytes_to_write = static_cast<uint64_t>(frames_to_write) * (FRAME_PAYLOAD + HEADER_SIZE);
-        if (current_size + bytes_to_write > max_file_size)
+        // std::cout<<cfg.Baseband_bits<<std::endl;
+        PacketBatch *readblock = nullptr;
+        m_queue->wait_dequeue(readblock);
+        const int frames_to_write = readblock->count;
+        if (current_size >= max_file_size)
         {
             if (create_file() != 0)
             {
-                cfg.logger_->error("baseband: create_file failed during rotation");
+                cfg.logger_->error(
+                    "baseband: create_file failed during rotation");
                 return;
             }
         }
-        iovec iov_x[2],iov_y[2];
-
-        for (int i = 0; i < frames_to_write; ++i)
+        if(cfg.Baseband_bits == 8)
         {
-            iov_x[0].iov_base = &readblockA->hdrs[i];
-            iov_x[0].iov_len = HEADER_SIZE;
-            iov_x[1].iov_base = readblockA->pkts[i]->payload;
-            iov_x[1].iov_len = FRAME_PAYLOAD;
-
-            iov_y[0].iov_base = &readblockB->hdrs[i];
-            iov_y[0].iov_len = HEADER_SIZE;
-            iov_y[1].iov_base = readblockB->pkts[i]->payload;
-            iov_y[1].iov_len = FRAME_PAYLOAD;
-            writev(fd_x, iov_x, 2);
-            writev(fd_y,iov_y,2);
+            for (int i = 0; i < frames_to_write; ++i)
+            {       
+                iov[2 * i].iov_base = &readblock->hdrs[i];
+                iov[2 * i].iov_len  = HEADER_SIZE;
+                iov[2 * i + 1].iov_base = readblock->pkts[i]->payload;
+                iov[2 * i + 1].iov_len  = FRAME_PAYLOAD;
+            }
         }
-        current_size += bytes_to_write;
+        if(cfg.Baseband_bits == 4)
+        {
+            for (int i = 0; i < frames_to_write; ++i)
+            {
+                quantize4_avx512(readblock->pkts[i]->payload, FRAME_PAYLOAD);
+
+                iov[2 * i].iov_base = &readblock->hdrs[i];
+                iov[2 * i].iov_len  = HEADER_SIZE;
+
+                iov[2 * i + 1].iov_base = readblock->pkts[i]->payload;
+                iov[2 * i + 1].iov_len  = FRAME_PAYLOAD/2;
+            }
+        }
+        const int iov_count = frames_to_write * 2;
+        const ssize_t ret =
+            writev(fd, iov.data(), static_cast<int>(iov_count));
+        if (ret < 0)
+        {
+            cfg.logger_->error(
+                "baseband: writev failed: {}",
+                strerror(errno));
+            return;
+        }
+        current_size += ret;
     }
 };
 
-baseband::baseband(int sub_band_id)
-    : m_subband_id(sub_band_id)
+baseband::baseband(int stream_id): m_stream_id(stream_id)
 {
     auto &cfg = GlobalConfig::getInstance();
-    m_queueA = &cfg.streams[m_subband_id * 2].queue;
-    m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
+    m_queue = &cfg.streams[m_stream_id].queue;
+    m_subband_id = m_stream_id/2;
+
+    // m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
     if (m_subband_id < 4)
         m_folder = cfg.Baseband_folder0;
     else
@@ -309,6 +272,6 @@ baseband::baseband(int sub_band_id)
 
 baseband::~baseband()
 {
-    if (fd_x >= 0)close(fd_x);
-    if (fd_y >= 0)close(fd_y);
+    if (fd >= 0)close(fd);
+    // if (fd_y >= 0)close(fd_y);
 }
