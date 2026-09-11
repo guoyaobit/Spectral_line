@@ -225,11 +225,14 @@ public:
         } else {
           throw std::runtime_error("配置文件缺少 Baseband_Folder1!");
         }
-        if (config["Baseband_bits"] && config["Baseband_bits"].IsScalar()) {
-          Baseband_bits = config["Baseband_bits"].as<int>();
-        } else {
-          throw std::runtime_error("配置文件缺少 Baseband_bits!");
-        }
+         if (config["Baseband_bits"] && config["Baseband_bits"].IsScalar()) {
+           Baseband_bits = config["Baseband_bits"].as<int>();
+         } else {
+           throw std::runtime_error("配置文件缺少 Baseband_bits!");
+         }
+         if (Baseband_bits != 8 && Baseband_bits != 4 && Baseband_bits != 2) {
+           throw std::runtime_error("Baseband_bits must be one of 8, 4, or 2");
+         }
 
         namespace fs = std::filesystem;
 

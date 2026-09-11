@@ -381,7 +381,7 @@ public:
 
     uint64_t on_ns =
         static_cast<uint64_t>(
-            period_ns * cfg.noise_source.duty_cycle);
+            period_ns * cfg.noise_source.duty_cycle / 100.0);
 
 
     if(new_state != m_noise_state)
@@ -440,10 +440,10 @@ public:
       uint64_t period_ns =
           cfg.noise_source.period_ms * 1000000ULL;
 
-      uint64_t on_ns =
-          static_cast<uint64_t>(
-              period_ns *
-              cfg.noise_source.duty_cycle);
+    uint64_t on_ns =
+        static_cast<uint64_t>(
+            period_ns *
+            cfg.noise_source.duty_cycle / 100.0);
 
       uint64_t blank_ns =
           cfg.noise_source.transition_blank_ms *

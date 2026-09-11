@@ -199,6 +199,24 @@ public:
             in += 2;
         }
     }
+    // Pack the two most-significant bits of four 8-bit samples into one byte.
+    // The resulting byte order is sample 0 in bits 7:6 through sample 3 in
+    // bits 1:0, matching the high-bit truncation used by the 4-bit path.
+    inline void quantize2(uint8_t *buf, size_t bytes)
+    {
+        size_t in = 0;
+        size_t out = 0;
+
+        while (in + 4 <= bytes)
+        {
+            buf[out++] = static_cast<uint8_t>(
+                (buf[in] & 0xC0) |
+                ((buf[in + 1] & 0xC0) >> 2) |
+                ((buf[in + 2] & 0xC0) >> 4) |
+                ((buf[in + 3] & 0xC0) >> 6));
+            in += 4;
+        }
+    }
     void recoder()
     {
         auto &cfg = GlobalConfig::getInstance();
@@ -225,7 +243,7 @@ public:
                 iov[2 * i + 1].iov_len  = FRAME_PAYLOAD;
             }
         }
-        if(cfg.Baseband_bits == 4)
+        else if(cfg.Baseband_bits == 4)
         {
             for (int i = 0; i < frames_to_write; ++i)
             {
@@ -237,6 +255,24 @@ public:
                 iov[2 * i + 1].iov_base = readblock->pkts[i]->payload;
                 iov[2 * i + 1].iov_len  = FRAME_PAYLOAD/2;
             }
+        }
+        else if(cfg.Baseband_bits == 2)
+        {
+            for (int i = 0; i < frames_to_write; ++i)
+            {
+                quantize2(readblock->pkts[i]->payload, FRAME_PAYLOAD);
+
+                iov[2 * i].iov_base = &readblock->hdrs[i];
+                iov[2 * i].iov_len  = HEADER_SIZE;
+
+                iov[2 * i + 1].iov_base = readblock->pkts[i]->payload;
+                iov[2 * i + 1].iov_len  = FRAME_PAYLOAD/4;
+            }
+        }
+        else
+        {
+            cfg.logger_->error("baseband: unsupported Baseband_bits {}", cfg.Baseband_bits);
+            return;
         }
         const int iov_count = frames_to_write * 2;
         const ssize_t ret =
