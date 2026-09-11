@@ -111,6 +111,51 @@ Logs are written to `log_YYYY-MM-DD_HH-MM-SS.log` in the working directory.
 The optional subband monitor publishes a recent VDIF frame to
 `/dev/shm/server_<ServerID>_stream_<stream>.bin`.
 
+## Install the monitor as a systemd service
+
+The monitor runs continuously with no command-line configuration. The supplied
+unit expects the checkout and virtual environment under `/opt/Spectral_line`
+and a service account named `spectral-line`:
+
+```sh
+sudo useradd --system --home-dir /opt/Spectral_line --shell /usr/sbin/nologin spectral-line
+sudo python3 -m venv /opt/Spectral_line/.venv
+sudo /opt/Spectral_line/.venv/bin/pip install -r /opt/Spectral_line/requirements-monitor.txt
+sudo install -m 0644 systemd/spectral-line-monitor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now spectral-line-monitor.service
+```
+
+The DPDK process creates monitor files with mode `0666`; ensure the active
+umask still permits the service account to read them. `/dev/shm` is recreated
+at boot, so the unit's `ExecStartPre` creates `/dev/shm/monitor_plots` with the
+correct service-account ownership each time it starts.
+
+To change concurrency without editing the unit, create
+`/etc/default/spectral-line-monitor`:
+
+```sh
+MONITOR_PLOT_WORKERS=16
+```
+
+The monitor accepts updates from all 16 stream files in one scan and submits
+them to the process pool together. The built-in default is the smaller of 16
+and the host's logical CPU count. Lower this value if monitor rendering affects
+the CPU cores reserved for DPDK packet reception.
+
+After every successful batch, `/dev/shm/monitor_plots/manifest.json` is replaced
+atomically. If any changed stream fails to render, the previous manifest stays
+active and the changed streams are retried during the next scan.
+
+After updating the repository, refresh the environment and restart only the
+monitor service:
+
+```sh
+sudo /opt/Spectral_line/.venv/bin/pip install -r /opt/Spectral_line/requirements-monitor.txt
+sudo systemctl restart spectral-line-monitor.service
+sudo journalctl -u spectral-line-monitor.service -f
+```
+
 ## Operational cautions
 
 - The main processing and receive loops run indefinitely. Use a supervisor and
