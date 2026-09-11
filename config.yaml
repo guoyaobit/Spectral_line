@@ -3,7 +3,7 @@ Debug: false
 ServerID: 0
 # don't make the memory pool size > 128GB
 Memory_pool_per_stream: 8 # GB
-observation_mode: 1 # 观测模式 0 : baseband 1: spcetrum
+observation_mode: 1 # 0: baseband, 1: spectral line, 2: continuum
 cal_mode: false
 noise_source:
   period_ms: 1000

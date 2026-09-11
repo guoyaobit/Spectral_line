@@ -9,18 +9,16 @@
 #include <unistd.h>
 extern int dpdk();
 
-// 线程入口函数
+// DPDK thread entry point.
 void *dpdk_thread(void *) {
   dpdk();
   return nullptr;
 }
 extern int init();
 int main() {
-  // init global config
   auto &cfg = GlobalConfig::getInstance();
   cfg.initlog();
   try {
-    // read cfg from yaml
     if (!cfg.initFromYaml("config.yaml")) {
       return 1;
     }
@@ -33,13 +31,11 @@ int main() {
         cfg.total_nfft = 8192 * 512; // 8192 * 512
       }
     }
-    // init memory
     init();
     std::unique_lock<std::mutex> lock(cfg.init_mutex);
     cfg.init_cv.wait(lock,
                      [&cfg] { return cfg.ready_threads == cfg.total_threads; });
     cfg.logger_->info("All subband threads are ready");
-    // start dpdk thread
     pthread_t dpdk_t;
     pthread_create(&dpdk_t, NULL, dpdk_thread, NULL);
     pthread_join(dpdk_t, NULL);

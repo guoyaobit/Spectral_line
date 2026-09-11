@@ -15,7 +15,7 @@ private:
     static constexpr size_t HEADER_SIZE = 4096;
     static constexpr size_t LINE_SIZE = 80;
 
-    // 生成 header ASCII 字符串
+    // Build the fixed-size ASCII header.
     std::string generateHeader() {
         std::ostringstream oss;
         for (const auto& kv : headerMap) {
@@ -25,7 +25,7 @@ private:
             if (str.size() > LINE_SIZE) str.resize(LINE_SIZE);
             oss << std::left << std::setw(LINE_SIZE) << str;
         }
-        // 填充剩余空格
+        // Pad the unused header area with spaces.
         std::string header = oss.str();
         if (header.size() < HEADER_SIZE)
             header.append(HEADER_SIZE - header.size(), ' ');
@@ -37,18 +37,18 @@ private:
 public:
     Writer() = default;
 
-    // 打开文件
+    // Open the output file.
     bool open(const std::string& filename) {
         ofs.open(filename, std::ios::binary);
         return ofs.is_open();
     }
 
-    // 设置 header key-value
+    // Set one header field.
     void setHeader(const std::string& key, const std::string& value) {
         headerMap[key] = value;
     }
 
-    // 写入 header
+    // Write the complete header.
     bool writeHeader() {
         if (!ofs.is_open()) return false;
         std::string header = generateHeader();
@@ -56,14 +56,14 @@ public:
         return ofs.good();
     }
 
-    // 写入数据
+    // Append binary payload data.
     bool writeData(const void* data, size_t size) {
         if (!ofs.is_open()) return false;
         ofs.write(reinterpret_cast<const char*>(data), size);
         return ofs.good();
     }
 
-    // 关闭文件
+    // Close the output file.
     void close() {
         if (ofs.is_open()) ofs.close();
     }

@@ -17,7 +17,7 @@ typedef struct {
   uint32_t obs_id;         // observation ID
   uint32_t integration_id; // integration counter
   // frequency information
-  uint16_t subband_id; // 子频段编号
+  uint16_t subband_id; // Subband identifier
   uint16_t window_id;  // window id
   double subband_start_freq;
   double subband_end_freq;
@@ -45,9 +45,7 @@ typedef struct {
 
 class SpectrumSender {
 public:
-  SpectrumSender() : sockfd_(-1) {
-    // 不初始化 socket，用户需要后续调用 init() 才能用
-  }
+  SpectrumSender() : sockfd_(-1) {}
 
   SpectrumSender(const std::string &ip, uint16_t port) { init(ip, port); }
 
@@ -70,60 +68,14 @@ public:
   ~SpectrumSender() {
     if (sockfd_ >= 0) {
       close(sockfd_);
-      // printf("socket closed\n");
     }
   }
-
-  // bool send(spectrum_header &header, const void *payload, size_t payload_len)
-  // {
-  //     if (sockfd_ < 0)
-  //     {
-  //         std::cerr << "❌ Socket not initialized!" << std::endl;
-  //         return false;
-  //     }
-
-  //     const char *payload_bytes = reinterpret_cast<const char *>(payload);
-  //     size_t offset = 0;
-  //     const size_t header_size = sizeof(spectrum_header);
-  //     const int mtu = 8192+header_size;
-  //     header.total_pkt = payload_len /8192;
-  //     if(header.total_pkt*8192 < payload_len)
-  //     {
-  //         header.total_pkt+=1;
-  //     }
-  //     for ( header.pkt_id =0;header.pkt_id <
-  //     header.total_pkt;header.pkt_id++)
-  //     {
-  //         // printf("%d\n",offset);
-  //         size_t chunk_size = std::min(static_cast<size_t>(mtu), payload_len
-  //         - offset); size_t total_len = header_size + chunk_size;
-
-  //         std::vector<char> buffer(total_len);
-
-  //         // 拷贝头部
-  //         memcpy(buffer.data(), &header, header_size);
-  //         // 拷贝当前分片
-  //         memcpy(buffer.data() + header_size, payload_bytes + offset,
-  //         chunk_size);
-
-  //         ssize_t sent = sendto(sockfd_, buffer.data(), total_len, 0,
-  //                               reinterpret_cast<sockaddr *>(&dest_addr_),
-  //                               sizeof(dest_addr_));
-  //         if (sent < 0)
-  //         {
-  //             perror("sendto failed");
-  //             return false;
-  //         }
-  //         offset += chunk_size;
-  //     }
-  // }
   bool send_spectrum(spectrum_header &header, const void *payload,
                      size_t payload_len) {
     if (sockfd_ < 0) {
-      std::cerr << "❌ Socket not initialized!" << std::endl;
+      std::cerr << "Socket is not initialized" << std::endl;
       return false;
     }
-    // printf("%f\n",header.start_freq_hz);
     const char *payload_bytes = reinterpret_cast<const char *>(payload);
     const size_t header_size = sizeof(spectrum_header);
     const size_t chunk_data_size = 8192;

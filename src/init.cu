@@ -5,38 +5,10 @@
 #include <malloc.h>   // for aligned_alloc
 #include <sys/mman.h> // for mlock, madvise
 #include <unistd.h>   // for sysconf
-// #include <GpuStokes.h>
 #include <baseband.hpp>
 #include <complex>
 #include <omp.h>
 #include <thread>
-// 生成长度 N 的 sinc 窗函数 (归一化), 存到 win
-// void genPfbWin(std::vector<float> &win, int N, int P) {
-//   if ((int)win.size() < N) {
-//     throw std::runtime_error("win size too small!");
-//   }
-
-//   float center = 1.0f * (N - 1) / 2.0f;
-//   float sum = 0.0f;
-
-//   // 生成 sinc 窗
-//   for (int i = 0; i < N; i++) {
-//     float t = i - center;
-//     float val;
-//     if (fabs(t) < 1e-6f) {
-//       val = 1.0f;
-//     } else {
-//       val = sinf(M_PI * t * P / N) / (M_PI * t * P / N);
-//     }
-//     win[i] = val;
-//     sum += val;
-//   }
-//   // 归一化
-//   for (int i = 0; i < N; i++) {
-//     win[i] /= sum;
-//   }
-// }
-
 // P-tap PFB prototype filter
 // N = FFT_size * P
 // h[n] = sinc * Hann
@@ -48,7 +20,7 @@ void genPfbWin(std::vector<float> &win, int N, int P) {
 
   double sum = 0.0;
 
-  // generate sinc * Hann window
+  // Generate a sinc-Hann prototype filter.
   for (int i = 0; i < N; i++) {
     double x = i - center;
 
@@ -63,7 +35,6 @@ void genPfbWin(std::vector<float> &win, int N, int P) {
       sinc = sin(arg) / arg;
     }
 
-    // Hann window
     double hann = 0.5 - 0.5 * cos(2.0 * M_PI * i / (N - 1));
 
     double h = sinc * hann;
@@ -73,7 +44,7 @@ void genPfbWin(std::vector<float> &win, int N, int P) {
     sum += h;
   }
 
-  // DC gain normalization
+  // Normalize the DC gain.
   for (int i = 0; i < N; i++) {
     win[i] /= static_cast<float>(sum);
   }
@@ -109,32 +80,18 @@ void subband_thread(int subband_id) {
   cfg.init_cv.notify_all();
   cfg.logger_->info("subband {} ready {}/{}", subband_id, cfg.ready_threads,
                     cfg.total_threads);
-  // if (cfg.observation_mode == ObservationMode::BASEBAND) // baseband mode
-  // {
-  //   cfg.logger_->info("subband {}: baseband mode, no PFB window generated",
-  //                     subband_id);
-  //   std::unique_ptr<baseband> baseband_obj =
-  //       std::make_unique<baseband>(subband_id);
-  //   while (true) {
-  //     baseband_obj->recoder();
-  //   }
-  // } else if (cfg.observation_mode == ObservationMode::SPECTRAL or
-  //            cfg.observation_mode ==
-  //                ObservationMode::CONTINUUM) // spectrum line mode and
-  //                continuum
-  //                                            // mode
   {
     cfg.logger_->info("subband {}: spectrum line mode, PFB window generated",
                       subband_id);
     size_t num_taps = 4;
-    // PfB+ FFT para
+    // PFB/FFT parameters.
     int Nfft = cfg.total_nfft;
     std::vector<float> pfbwin(num_taps * Nfft);
     genPfbWin(pfbwin, num_taps * Nfft, num_taps);
     std::unique_ptr<GpuPfbFft> obj =
         std::make_unique<GpuPfbFft>(subband_id, pfbwin.data());
     while (true) {
-      obj->accumulate_one_block(); // CPU -> GPU 异步拷贝
+      obj->accumulate_one_block(); // Asynchronous CPU-to-GPU copy
       obj->submit_PFB_FFT();       // PFB+ FFT
       obj->StokesAcc();            // Stokes kernel
     }
@@ -166,7 +123,7 @@ size_t calc_pool_size() {
 }
 int init() {
   auto &cfg = GlobalConfig::getInstance();
-  // thread synchronization
+  // Count workers that must complete initialization.
   size_t enabled_subbands = 0;
   for (size_t i = 0; i < cfg.subbands.size(); i++) {
     if (!cfg.subbands[i]->enable)
@@ -185,7 +142,7 @@ int init() {
 
   size_t enabled_streams = 0;
 
-  // 1. 初始化 stream 映射
+  // Map receive streams to enabled subbands.
   for (size_t s = 0; s < cfg.max_streams; ++s) {
     cfg.streams.emplace_back(cfg.QUEUE_CAPACITY);
 
@@ -208,7 +165,7 @@ int init() {
 
   int batchsize = cfg.batchsize();
 
-  // 2. 只为启用的 stream 分配 pinned memory
+  // Allocate packet memory only for enabled streams.
   uint64_t total_packets =
       static_cast<uint64_t>(enabled_streams) * cfg.QUEUE_CAPACITY * batchsize;
 
@@ -217,9 +174,7 @@ int init() {
   cfg.logger_->info("QUEUE_CAPACITY = {}", cfg.QUEUE_CAPACITY);
 
   cfg.logger_->info("Enabled streams = {}", enabled_streams);
-  // DO NOT use cudaMallocHost for baseband mode,beause it does't need gpu
-  // memory, and it will cause the program to crash when the memory is
-  // insufficient.
+  // Baseband recording does not require CUDA-pinned host memory.
   if (cfg.observation_mode == ObservationMode::SPECTRAL ||
       cfg.observation_mode == ObservationMode::CONTINUUM) {
     cfg.logger_->info("Allocating {:.2f} GiB pinned memory ({} bytes)",
@@ -234,17 +189,10 @@ int init() {
       throw std::runtime_error(cudaGetErrorString(err));
     }
   } else {
-    // cfg.packet_pool = static_cast<Packet *>(malloc(total_bytes));
-
-    // if (cfg.packet_pool == nullptr) {
-    //   throw std::runtime_error("malloc packet_pool failed");
-    // }
-    // 1.
     cfg.packet_pool = static_cast<Packet *>(aligned_alloc(64, total_bytes));
     if (cfg.packet_pool == nullptr) {
       throw std::runtime_error("aligned_alloc failed");
     }
-    // 2.
     if (mlock(cfg.packet_pool, total_bytes) != 0) {
       std::cerr << "Warning: mlock failed, performance may degrade"
                 << std::endl;
@@ -252,7 +200,7 @@ int init() {
   }
   memset(cfg.packet_pool, 0, total_bytes);
 
-  // 3. 建立 PacketBatch 到连续内存的映射
+  // Map PacketBatch objects onto the contiguous packet pool.
   for (size_t s = 0; s < cfg.max_streams; ++s) {
     auto &stream = cfg.streams[s];
 
@@ -272,7 +220,7 @@ int init() {
     }
   }
 
-  // 4. 启动子带线程
+  // Start one worker per active baseband stream or spectral subband.
   if (cfg.observation_mode == ObservationMode::BASEBAND) {
     for (int i = 0; i < cfg.max_streams; ++i) {
       int subband_id = i / 2;
@@ -310,25 +258,7 @@ int init() {
     }
   }
 
-  // // 4. 启动子带线程
-  // for (size_t i = 0; i < cfg.subbands.size(); ++i) {
-  //   if (!cfg.subbands[i]->enable) {
-  //     cfg.logger_->info("subband {} is disabled, skip it.", i);
-  //     continue;
-  //   }
-  //   cfg.logger_->info("subband {}: starting thread on GPU {}", i,
-  //                     cfg.subbands[i]->gpu_id);
-
-  //   std::thread t(subband_thread, i);
-  //   cpu_set_t cpuset;
-  //   CPU_ZERO(&cpuset);
-  //   unsigned cpu_id = cfg.max_streams + 1 + i;
-  //   CPU_SET(cpu_id, &cpuset);
-  //   pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
-  //   cfg.logger_->info("subband {}: thread pinned to CPU {}", i, cpu_id);
-  //   t.detach();
-  // }
-  // 5.
+  // Remove stale monitor files before receiving new frames.
   for (int stream_id = 0; stream_id < cfg.max_streams; ++stream_id) {
     std::string path = "/dev/shm/server_" + std::to_string(cfg.ServerID) +
                        "_stream_" + std::to_string(stream_id) + ".bin";

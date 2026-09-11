@@ -7,15 +7,11 @@
 #include <memory>
 #include <stdexcept>
 #include <vector>
-#include <inttypes.h>
 #include <atomic>
 #include <cmath>
 #include <thread>
 #include <Globalcfg.hpp>
-#include <Writer.h>
 #include <cuda_fp16.h>
-#include <fstream>
-#include <future>
 #include <string>
 
 #define CUDA_CHECK(call)                                                                                                                                       \
@@ -55,32 +51,24 @@ extern "C" __global__ void stokes_IQUV_accumulate(complexf *__restrict__ A, //
   float y_re = y.x;
   float y_im = y.y;
 
-  // |x|^2 和 |y|^2，用 fmaf
+  // Compute polarization powers with fused multiply-add.
   float xx = fmaf(x_re, x_re, x_im * x_im);
   float yy = fmaf(y_re, y_re, y_im * y_im);
 
-  // x * conj(y)
-  // float xy_re = fmaf(x_re, y_re, x_im * y_im);  // Re(x*y*)
-  // float xy_im = fmaf(x_im, y_re, -x_re * y_im); // Im(x*y*)
-  // Stokes 参数
-  // float I = xx + yy;
-  // float Q = xx - yy;
-  // float U = 2.0f * xy_re;
-  // float V = 2.0f * xy_im;
   float x_rey_im = x_re * y_im;
   float x_imy_re = x_im * y_re;
-  // 对应频点做原子加
+  // Accumulate the four products for this frequency bin.
   atomicAdd(&pf4SumStokes[idx].x, xx);
   atomicAdd(&pf4SumStokes[idx].y, yy);
   atomicAdd(&pf4SumStokes[idx].z, x_rey_im);
   atomicAdd(&pf4SumStokes[idx].w, x_imy_re);
 }
 
-extern "C" __global__ void kernel_pfb_sum(const complexf *__restrict__ ring, // 环形缓冲区 [W = num_taps*m_Nfft]
-                                          const float *__restrict__ taps,    // 实数滤波器系数 [num_taps * m_Nfft]
-                                          complexf *__restrict__ output,     // 输出 [m_Nfft]
+extern "C" __global__ void kernel_pfb_sum(const complexf *__restrict__ ring, // Ring buffer [W = num_taps*m_Nfft]
+                                          const float *__restrict__ taps,    // Real filter coefficients [num_taps*m_Nfft]
+                                          complexf *__restrict__ output,     // PFB output [m_Nfft]
                                           size_t m_Nfft, size_t num_taps,
-                                          size_t head // 当前写指针
+                                          size_t head // Current write position
 ) {
   size_t p = blockIdx.x * blockDim.x + threadIdx.x;
   cuFloatComplex acc = make_cuFloatComplex(0.0f, 0.0f);
@@ -90,7 +78,7 @@ extern "C" __global__ void kernel_pfb_sum(const complexf *__restrict__ ring, // 
   #pragma unroll
   for (size_t t = 0; t < num_taps; ++t) {
     size_t idx = head + t * m_Nfft + p;
-    if (idx >= W) idx -= W; // 避免 %
+    if (idx >= W) idx -= W; // Avoid modulo in the inner loop.
     complexf vin = ring[idx];
     float ht = taps[t * m_Nfft + p];
     acc.x = fmaf(vin.x, ht, acc.x);
@@ -100,11 +88,11 @@ extern "C" __global__ void kernel_pfb_sum(const complexf *__restrict__ ring, // 
   output[p] = acc;
 }
 constexpr float scale = 1.0f / 127.0f;
-extern "C" __global__ void uint8_offsetIQ_to_ring(const uint8_t *__restrict__ src, // 移位二进制 I/Q
-                                                  complexf *__restrict__ gpuRing,  // 环形缓冲区
-                                                  size_t N,    // 复数样本数
-                                                  size_t head, // 当前写指针 (host 传入)
-                                                  size_t W     // 环形缓冲区容量 (复数样本数)
+extern "C" __global__ void uint8_offsetIQ_to_ring(const uint8_t *__restrict__ src, // Offset-binary I/Q
+                                                  complexf *__restrict__ gpuRing,  // Device ring buffer
+                                                  size_t N,    // Complex sample count
+                                                  size_t head, // Host-provided write position
+                                                  size_t W     // Ring capacity in complex samples
 ) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= N) return;
@@ -113,7 +101,7 @@ extern "C" __global__ void uint8_offsetIQ_to_ring(const uint8_t *__restrict__ sr
   uchar2 s = iq[idx];
   float re = __int2float_rn((int)s.y - 128) * scale;
   float im = __int2float_rn((int)s.x - 128) * scale;
-  // 写入缓冲区
+  // Store the converted sample in the ring.
   size_t ring_idx = (head + idx) % W;
   gpuRing[ring_idx] = make_float2(re, im);
 }
@@ -202,7 +190,6 @@ public:
     auto &cfg = GlobalConfig::getInstance();
     m_config = cfg.subbands[m_subband_id];
 
-    m_gpu_id = m_config->gpu_id;
     m_Nfft = cfg.total_nfft;
     m_queueA = &cfg.streams[m_subband_id * 2].queue;
     m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
@@ -211,7 +198,7 @@ public:
     cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking);
     cudaStreamCreateWithFlags(&sH2DB, cudaStreamNonBlocking);
 
-    // 数据转换 streams
+    // Sample conversion streams.
     cudaStreamCreateWithFlags(&sConvA, cudaStreamNonBlocking);
     cudaStreamCreateWithFlags(&sConvB, cudaStreamNonBlocking);
 
@@ -219,7 +206,7 @@ public:
     cudaStreamCreateWithFlags(&sPFBA, cudaStreamNonBlocking);
     cudaStreamCreateWithFlags(&sPFBB, cudaStreamNonBlocking);
 
-    // Stokes + 积分 stream
+    // Stokes accumulation and device-to-host stream.
     cudaStreamCreateWithFlags(&sD2H, cudaStreamNonBlocking);
 
     // allocate device buffers:
@@ -231,7 +218,6 @@ public:
     size_t device_input_bytes = m_Nfft*m_num_taps * sizeof(complexf); // after conversion int8->float complex
     m_pfb_ringsize = m_Nfft * m_num_taps;
 
-    // m_input_ringbytes = m_ringcap * device_input_bytes;
     CUDA_CHECK(cudaMalloc((void **)&m_d_inputA, device_input_bytes)); // size num_taps*m_Nfft complexf
     CUDA_CHECK(cudaMemset(m_d_inputA, 0, device_input_bytes));
     CUDA_CHECK(cudaMalloc((void **)&m_d_inputB, device_input_bytes)); // size num_taps*m_Nfft complexf
@@ -292,21 +278,14 @@ public:
         throw std::runtime_error(
             "integration_time must be >= fft_period");
     }
-    cal_blank_len = static_cast<uint32_t>(std::ceil(10e-3 / cfg.fft_period()));
-    
     // result on host ring buffer
     SLOT_SIZE = m_Nfft * sizeof(float4);
-    // m_hring.resize(NUM_SLOTS);
-
     for (auto &slot : m_hring) {
       cudaMallocHost(reinterpret_cast<void **>(&slot.data), SLOT_SIZE);
       memset(slot.data, 0, SLOT_SIZE);
       cudaEventCreateWithFlags(&slot.event, cudaEventBlockingSync);
     }
-    std::thread pushresult([this]() {
-      send_data();
-      //    write_to_file();
-    });
+    std::thread pushresult([this]() { send_data(); });
     pushresult.detach();;
   }
   // Avoid lose arp while start dpdk
@@ -337,7 +316,6 @@ public:
             float max = 0;
             int max_freq = 0;
             for (size_t i = 0; i < m_Nfft; i++) {
-              // if (m_hring[idx][i].x > max)
               if (slot.data[i].x > max) {
                 max = m_hring[idx].data[i].x;
                 max_freq = i;
@@ -351,11 +329,10 @@ public:
         }
 
         uint64_t fft_period_ns = static_cast<uint64_t>(cfg.fft_period() * 1e9);
-        // std::cout << acc_noise_state[idx] << std::endl;
         if(cfg.observation_mode == ObservationMode::SPECTRAL) {
           for (size_t i = 0; i < m_config->windows.size(); i++) {
             size_t start_idx = m_config->windows[i]->start_idx;
-            // timestamp_ns is mjd 
+            // Use the midpoint of the accumulated FFT intervals.
             m_config->windows[i]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
             m_config->windows[i]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
             m_config->windows[i]->sender.send_spectrum(m_config->windows[i]->header, &slot.data[start_idx], channels * sizeof(float4));
@@ -387,14 +364,14 @@ public:
     if(new_state != m_noise_state)
     {
         /*
-         * 第一次状态跳变，建立周期参考
+         * Establish the cycle reference on the first state transition.
          */
         if(m_noise_cycle_start_ns == 0)
         {
             if(new_state == NoiseState::ON)
             {
                 /*
-                 * ON开始就是周期起点
+                 * The start of ON is the start of a cycle.
                  */
                 m_noise_cycle_start_ns =
                     m_timestamp_ns;
@@ -402,11 +379,7 @@ public:
             else
             {
                 /*
-                 * 当前进入OFF
-                 *
-                 * OFF开始 = 周期起点 + ON时间
-                 *
-                 * 反推周期起点
+                 * Infer the cycle start from the beginning of OFF.
                  */
                 m_noise_cycle_start_ns =
                     m_timestamp_ns - on_ns;
@@ -415,7 +388,7 @@ public:
         else
         {
             /*
-             * 周期固定，只需要在ON边沿修正漂移
+             * Correct drift only on the ON edge of the fixed cycle.
              */
             if(new_state == NoiseState::ON)
             {
@@ -425,7 +398,6 @@ public:
         }
 
 
-        m_last_transition_ns = m_timestamp_ns;
     }
 
 
@@ -454,13 +426,13 @@ public:
           m_noise_cycle_start_ns)
           % period_ns;
 
-      // OFF->ON切换点
+      // Distance from the OFF-to-ON transition.
       uint64_t dist_on =
           std::min(
               phase,
               period_ns - phase);
 
-      // ON->OFF切换点
+      // Distance from the ON-to-OFF transition.
       uint64_t dist_off =
           (phase >= on_ns) ?
           phase - on_ns :
@@ -477,8 +449,6 @@ public:
     m_queueA->wait_dequeue(readblockA);
     m_queueB->wait_dequeue(readblockB);
     if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95) cfg.logger_->debug("Buffed {} batch in queue,more than 95%%", m_queueA->size_approx());
-    //  printf("Got dual block data on sub band %d", m_subband_id);
-    //
     size_t m_pktidA = readblockA->pkt_id[0];
     size_t m_pktidB = readblockB->pkt_id[0];
     if (cfg.Debug_mode) {
@@ -505,9 +475,6 @@ public:
     NoiseState new_state =
         static_cast<NoiseState>(readblockA->noise_state[0]);
         update_noise_state(new_state);
-        //TODO test if the noise state is correct
-        // printf("Subband %d timestamp_ns: %" PRIu64 " noise_state: %d\n", m_subband_id, m_timestamp_ns, static_cast<int>(m_noise_state));
-        
     }
 
     CUDA_CHECK(cudaMemcpyAsync(m_rawA, readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA));
@@ -516,13 +483,11 @@ public:
     CUDA_CHECK(cudaEventRecord(evtH2DB_done, sH2DB));
     CUDA_CHECK(cudaEventSynchronize(evtH2DA_done));
     CUDA_CHECK(cudaEventSynchronize(evtH2DB_done));
-    // TODO check A AND B sync state
-    // printf("got one block data on gpu");
     return true;
   }
   void submit_PFB_FFT() {
     // trans raw int8 block data to float and save to gpu ring
-    int blockSize = 256; // 推荐 128 / 256 / 512
+    int blockSize = 256;
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
     cudaStreamWaitEvent(sConvA, evtH2DA_done, 0);
@@ -539,15 +504,12 @@ public:
     cudaStreamWaitEvent(sPFBB, evtConvB_done, 0);
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBB>>>(m_d_inputB, m_filters, m_d_pfbedB, m_Nfft, m_num_taps, m_pfb_head);
     // DO FFT
-    // m_fft_ring_id = m_block_id % m_ringcap;
-
     CUFFT_CHECK(cufftExecC2C(m_planA, m_d_pfbedA, m_ffted_bufsA, CUFFT_FORWARD));
     fftshift_1d<<<gridSize, blockSize, 0, sPFBA>>>(m_ffted_bufsA, m_Nfft);
     cudaEventRecord(evtPFBA_done, sPFBA);
     CUFFT_CHECK(cufftExecC2C(m_planB, m_d_pfbedB, m_ffted_bufsB, CUFFT_FORWARD));
     fftshift_1d<<<gridSize, blockSize, 0, sPFBB>>>(m_ffted_bufsB, m_Nfft);
     cudaEventRecord(evtPFBB_done, sPFBB);
-    // m_block_id++;
   }
 
   void StokesAcc() {
@@ -561,7 +523,7 @@ public:
     if (cfg.cal_mode) {
       if( is_noise_blank(m_timestamp_ns)) return;
       /*
-       * ON积分
+       * Accumulate noise-source ON samples.
        */
       if (m_noise_state == NoiseState::ON) {
         if(m_acc_on_id == 0)
@@ -575,7 +537,7 @@ public:
         continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_ON);
 
         /*
-         * ON累计时间达到积分时间
+         * Publish after one full ON integration.
          */
         if (m_acc_on_id >= m_acc_len) {
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
@@ -602,7 +564,7 @@ public:
       }
 
       /*
-       * OFF积分
+       * Accumulate noise-source OFF samples.
        */
       else {
         if(m_acc_off_id == 0)
@@ -616,7 +578,7 @@ public:
         continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
         
         /*
-         * OFF累计时间达到积分时间
+         * Publish after one full OFF integration.
          */
         if (m_acc_off_id >= m_acc_len) {
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
@@ -676,10 +638,9 @@ public:
   }
 
 private:
-  moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueA; // 队列
+  moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueA;
   moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueB;
   int m_subband_id;
-  int m_gpu_id = 0;
   size_t m_Nfft = 0;// FFT size
   size_t m_num_taps = 4;// PFB taps
 
@@ -714,33 +675,23 @@ private:
   cudaEvent_t evtConvA_done, evtConvB_done;
   cudaEvent_t evtPFBA_done, evtPFBB_done;
 
-  // FFT Result
-  std::vector<cudaEvent_t> m_fft_done;
+  // FFT results
   cufftComplex *m_ffted_bufsA;
   cufftComplex *m_ffted_bufsB;
-  int m_block_id = 0;
   // stockes and ACC
   float4 *m_acc_stokes_ON;
   float4 *m_acc_stokes_OFF;
   u_int m_acc_len;
   u_int m_acc_id = 0;
-  uint32_t cal_blank_len = 0;
   // result buffer
   static constexpr int NUM_SLOTS = 16;
-  size_t SLOT_SIZE = 0; // 每槽字节数
+  size_t SLOT_SIZE = 0; // Bytes per host result slot
   std::array<HostRingSlot, NUM_SLOTS> m_hring;
   int m_hhead = 0;
   SubbandConfig *m_config;
   uint64_t m_timestamp_ns = 0;
   NoiseState m_noise_state = NoiseState::OFF;
-  NoiseState pre_noise_state = NoiseState::OFF;
   uint64_t m_noise_cycle_start_ns = 0;
-  uint64_t m_last_transition_ns = 0;
-  bool m_noise_cycle_valid=false;
-  bool blank = false;
-  // static constexpr uint64_t CAL_BLANK_NS = 10ULL * 1000 * 1000;
   uint32_t m_acc_on_id = 0;
   uint32_t m_acc_off_id = 0;
-  uint32_t discard_id = 0;
-  uint32_t acc_noise_blank = 0;
 };

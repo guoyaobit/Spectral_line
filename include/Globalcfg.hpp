@@ -19,9 +19,9 @@
 #include <vector>
 #include <yaml-cpp/yaml.h>
 enum class ObservationMode : uint8_t {
-  BASEBAND = 0, // 基带记录模式 (Raw Baseband Recording)
-  SPECTRAL = 1, // 谱线观测模式 (Spectral Line Observation)
-  CONTINUUM = 2 // 连续谱观测模式 (Continuum Observation)
+  BASEBAND = 0, // Raw baseband recording
+  SPECTRAL = 1, // Spectral-line observation
+  CONTINUUM = 2 // Continuum observation
 };
 struct Packet {
   uint8_t payload[8192]; // 4096*(Re + Im)
@@ -31,21 +31,19 @@ struct PacketBatch {
   std::vector<uint> pkt_id;
   std::vector<uint8_t> noise_state;
   bool valid = true;
-  Packet *buffer; // 连续大 buffer
+  Packet *buffer; // Contiguous packet buffer
   std::vector<VDIF> hdrs;
-  std::vector<Packet *> pkts; // 一次 FFT 的数据包集合
+  std::vector<Packet *> pkts; // Packets for one FFT interval
 };
 
-// 最终结果存储结构
+// Integrated result stored on the host.
 struct StokesResult {
-  size_t frame_id;         // 哪一帧/积累段
-  std::vector<float> data; // Nfft 个频点，每个频点一个 float4(I,Q,U,V)
+  size_t frame_id;         // Frame or integration interval
+  std::vector<float> data; // One float4 (I, Q, U, V) per frequency bin
 };
 struct WindowConfig {
   float start_freq;
   size_t start_idx;
-  // float end_freq;
-  // size_t end_idx;
   float center_freq;
   float BW;
   SpectrumSender sender;
@@ -83,7 +81,7 @@ public:
   size_t ready_threads = 0;
   size_t total_threads = 0;
   void initlog() {
-    // 生成带时间戳的日志文件名
+    // Generate a timestamped log filename.
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
     std::tm tm = *std::localtime(&t);
@@ -92,67 +90,60 @@ public:
     oss << "log_" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".log";
     std::string logfile = oss.str();
 
-    // 初始化 spdlog 线程池（队列大小、线程数）
-    spdlog::init_thread_pool(1 << 16, 1); // 64K 队列，1 个后台线程
+    spdlog::init_thread_pool(1 << 16, 1); // 64K queue, one worker thread
 
-    // 创建文件 sink
     auto file_sink =
         std::make_shared<spdlog::sinks::basic_file_sink_mt>(logfile, true);
 
-    // 创建异步 logger
     logger_ = std::make_shared<spdlog::async_logger>(
         "async_logger", file_sink, spdlog::thread_pool(),
         spdlog::async_overflow_policy::block);
 
-    // 设置为默认 logger
     spdlog::set_default_logger(logger_);
     spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [thread %t] [%^%l%$] %v");
     spdlog::set_level(spdlog::level::debug);
     spdlog::flush_every(std::chrono::seconds(1));
-    printf("程序启动，日志文件: %s\n", logfile.c_str());
+    printf("Program started; log file: %s\n", logfile.c_str());
   }
-  // default para
+  // Runtime defaults.
   bool Debug_mode = false;
   int ServerID = 0;
-  uint8_t max_streams = 16;        // 最大接收流数
-  uint8_t enabled_streams = 0;     // 实际启用的接收流数
+  uint8_t max_streams = 16;        // Maximum number of receive streams
+  uint8_t enabled_streams = 0;     // Number of enabled receive streams
   const int sampling_rate = 256e6; // samaping rate
   std::string Storage_node_ip, Storage_node_mac, Sender_Nic;
   const int precision = 1 + 1;  // real 8bit ,image 8bit
-  const int packet_size = 8192; // 每个数据包字节数
+  const int packet_size = 8192; // Payload bytes per packet
   int total_nfft = 65536;       // must be multipied by 4096
   const int Max_nfft = 65536 * 256;
   float win_bw = 256e6;
   int win_channels = 4096;
   double integration_t = 1;
-  ObservationMode observation_mode =
-      ObservationMode::SPECTRAL; // 默认单窗口分子谱线模式
+  ObservationMode observation_mode = ObservationMode::SPECTRAL;
   bool cal_mode = false;
   NoiseSourceConfig noise_source;
   std::string Baseband_folder0;
   std::string Baseband_folder1;
   int Baseband_bits = 8;
-  bool subband_monitor = false; // 是否开启子频段监控模式
-  // how many packet in one batch(FFT period)
+  bool subband_monitor = false; // Publish recent frames for monitoring
+  // Packets in one FFT interval.
   int batchsize() const { return total_nfft / 4096; }
-  // 每次 FFT 的时间长度
+  // Duration of one FFT interval.
   double fft_period() const {
     return static_cast<double>(total_nfft) / sampling_rate;
   }
 
-  // 总积分时间，调整为 FFT 周期整数倍
+  // Round the requested integration time down to complete FFT intervals.
   double integration_time() const {
     int N = static_cast<int>(integration_t / fft_period());
     if (N < 1)
-      N = 1; // 至少 1 个 FFT
+      N = 1; // Always integrate at least one FFT.
     return N * fft_period();
   }
-  // input queques
+  // Input queues and backing memory.
   size_t Memory_pool_per_stream = 64; // GB
   Packet *packet_pool = nullptr;
   std::size_t QUEUE_CAPACITY = 64; // key value about memory usage
-  // std::vector<moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *>>
-  // stream_queues; std::vector<std::vector<PacketBatch *>> stream_pools;
   std::vector<SubbandConfig *> subbands;
   struct StreamContext {
     bool enable = false;
@@ -184,7 +175,7 @@ public:
           " (valid values: 0, 1, 2)");
     }
   }
-  // 初始化 YAML 配置
+  // Load and validate the YAML configuration.
   bool initFromYaml(const std::string &filename) {
     try {
       YAML::Node config = YAML::LoadFile(filename);
@@ -200,35 +191,35 @@ public:
       if (config["Storage_node_ip"] && config["Storage_node_ip"].IsScalar()) {
         Storage_node_ip = config["Storage_node_ip"].as<std::string>();
       } else {
-        Storage_node_ip = "127.0.0.1"; // 默认值
+        Storage_node_ip = "127.0.0.1"; // Default value
       }
       if (config["Storage_node_mac"] && config["Storage_node_mac"].IsScalar()) {
         Storage_node_mac = config["Storage_node_mac"].as<std::string>();
       } else {
-        throw std::runtime_error("配置文件缺少 Storage_node_mac!");
+        throw std::runtime_error("Configuration is missing Storage_node_mac");
       }
       if (config["Sender_Nic"] && config["Sender_Nic"].IsScalar()) {
         Sender_Nic = config["Sender_Nic"].as<std::string>();
       } else {
-        throw std::runtime_error("配置文件缺少 Sender_Nic!");
+        throw std::runtime_error("Configuration is missing Sender_Nic");
       }
       if (observation_mode == ObservationMode::BASEBAND) {
         if (config["Baseband_Folder0"] &&
             config["Baseband_Folder0"].IsScalar()) {
           Baseband_folder0 = config["Baseband_Folder0"].as<std::string>();
         } else {
-          throw std::runtime_error("配置文件缺少 Baseband_Folder0!");
+          throw std::runtime_error("Configuration is missing Baseband_Folder0");
         }
         if (config["Baseband_Folder1"] &&
             config["Baseband_Folder1"].IsScalar()) {
           Baseband_folder1 = config["Baseband_Folder1"].as<std::string>();
         } else {
-          throw std::runtime_error("配置文件缺少 Baseband_Folder1!");
+          throw std::runtime_error("Configuration is missing Baseband_Folder1");
         }
          if (config["Baseband_bits"] && config["Baseband_bits"].IsScalar()) {
            Baseband_bits = config["Baseband_bits"].as<int>();
          } else {
-           throw std::runtime_error("配置文件缺少 Baseband_bits!");
+           throw std::runtime_error("Configuration is missing Baseband_bits");
          }
          if (Baseband_bits != 8 && Baseband_bits != 4 && Baseband_bits != 2) {
            throw std::runtime_error("Baseband_bits must be one of 8, 4, or 2");
@@ -261,11 +252,8 @@ public:
           throw std::runtime_error("win_bw must be finite and > 0");
       if (config["win_channels"])
         win_channels = config["win_channels"].as<int>();
-      // get total nfft from para
-
+      // Derive the FFT length from the requested window.
       total_nfft = sampling_rate / win_bw * win_channels;
-
-      // printf("%d\n", total_nfft);
 
       if (config["integration_t"])
         integration_t = config["integration_t"].as<double>();
@@ -297,9 +285,8 @@ public:
             "noise_source.transition_blank_ms must be >= 0");
 
       if (!config["subbands"] || !config["subbands"].IsSequence()) {
-        throw std::runtime_error("配置文件缺少 subbands config!");
+        throw std::runtime_error("Configuration is missing subbands");
       }
-      // int send_start_port = 60000;
       int subband_id = 0;
       for (const auto &sbNode : config["subbands"]) {
         SubbandConfig *sb = new SubbandConfig();
@@ -315,7 +302,7 @@ public:
         sb->port = sbNode["port"].as<int>();
 
         if (!sbNode["windows"]) {
-          throw std::runtime_error("配置文件缺少 window config!");
+          throw std::runtime_error("Configuration is missing windows");
         }
         int win_id = 0;
         for (const auto &winNode : sbNode["windows"]) {
@@ -336,31 +323,18 @@ public:
 
           w->start_idx =
               round(w->start_freq - sb->start_freq) / sb->BW * total_nfft;
-          // w->end_idx = round(w->end_freq - sb->start_freq) / sb->BW *
-          // total_nfft; if (w->end_idx - w->start_idx+1 != win_channels)
-          // {
-          //     logger_->error("YAML : cal start_idx or end_idx in windows
-          //     error ! {} != {}", w->end_idx - w->start_idx, win_channels);
-          // }
           w->sender.init(Storage_node_ip, w->port);
           w->header.exposure = integration_time();
           w->header.channel_bw_hz = (float)sampling_rate / total_nfft;
           w->header.subband_start_freq = sb->start_freq;
           w->header.subband_end_freq = sb->end_freq;
-          // max 8 subbands in one server, so subband_id = ServerID*100
+          // Each server supports at most eight subbands.
           w->header.subband_id = ServerID * 8 + sb->subband_id;
           w->header.start_freq_hz =
               sb->start_freq + w->start_idx * sampling_rate / total_nfft;
           w->header.n_channels = win_channels;
           w->header.window_id = win_id++;
-          // send_start_port+=1;
           logger_->info("dest ip {},port {}", Storage_node_ip, w->port);
-          // logger_->info("window start_idx = {} , window end_idx = {},
-          // w->end_idx-w->start_idx = {}",
-          //               w->start_idx, w->end_idx, w->end_idx - w->start_idx);
-          // std::cout<<w->start_idx<<" to " <<w->end_idx <<" == "<<
-          // w->end_idx-w->start_idx<<std::endl; w->BW =
-          // winNode["BW"].as<float>();
           sb->windows.push_back(w);
         }
 
@@ -369,7 +343,6 @@ public:
         }
         subbands.push_back(sb);
       }
-      // return true;
     } catch (const std::exception &e) {
       logger_->error("Configuration parsing failed: {}", e.what());
       return false;

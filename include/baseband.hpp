@@ -14,8 +14,6 @@
 #include <immintrin.h>
 #include <Globalcfg.hpp>
 #include <sys/uio.h>
-#include <unistd.h>
-// Ensure PacketBatch, Packet, and moodycamel queue headers are included in build
 
 class baseband
 {
@@ -23,18 +21,14 @@ private:
     int m_stream_id;
     int m_subband_id;
     moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queue;
-    // moodycamel::BlockingReaderWriterCircularBuffer<PacketBatch *> *m_queueB;
     int fd = -1;
-    // int fd_y = -1;
-    static constexpr uint64_t DEFAULT_MAX_FILE_SIZE = 8ULL * 1024 * 1024 * 1024; // 4 GB
+    static constexpr uint64_t DEFAULT_MAX_FILE_SIZE = 8ULL * 1024 * 1024 * 1024; // 8 GiB
     uint64_t max_file_size = DEFAULT_MAX_FILE_SIZE;
     uint64_t current_size = 0;
     uint32_t file_index = 0;
     std::string m_folder;
 
     static constexpr size_t FRAME_PAYLOAD = 8192;
-    uint8_t vdif_payloadA[FRAME_PAYLOAD];
-    // uint8_t vdif_payloadB[FRAME_PAYLOAD];
     static constexpr size_t HEADER_SIZE = 32;
     std::array<iovec, 1024> iov;
 
@@ -46,11 +40,6 @@ private:
             ::close(fd);
             fd = -1;
         }
-        // if (fd_y >= 0)
-        // {
-        //     ::close(fd);
-        //     fd = -1;
-        // }
         current_size = 0;
 
         std::filesystem::path folder(m_folder);
@@ -63,10 +52,7 @@ private:
             cfg.logger_->error("baseband: create_directories({}) failed: {}", folder.string(), ec.message());
             return -1;
         }
-        // const auto &subband = *cfg.subbands[m_subband_id];
-
         char basename[256];
-        // char basename_y[256];
 
         const unsigned int current_file_index = file_index++;
         const char *pol = (m_stream_id % 2 == 0) ? "X" : "Y";
@@ -102,19 +88,6 @@ private:
             return -1;
         }
 
-
-        // if (std::snprintf(basename_y,
-        //                 sizeof(basename_y),
-        //                 "%uM-%uM_Y_%04u.vdif",
-        //                 static_cast<unsigned int>(subband.start_freq / 1e6f),
-        //                 static_cast<unsigned int>(subband.end_freq / 1e6f),
-        //                 current_file_index) < 0)
-        // {
-        //     GlobalConfig::getInstance().logger_->error(
-        //         "baseband: snprintf failed for Y polarization filename");
-        //     return -1;
-        // }
-
         std::filesystem::path filepath = folder / basename;
         fd = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd < 0)
@@ -123,14 +96,6 @@ private:
             cfg.logger_->error("baseband: open('{}') failed: {} (errno={})", filepath.string(), std::strerror(errno), errno);
             return -1;
         }
-        // filepath = folder / basename_y;
-        // fd_y = ::open(filepath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        // if (fd_y < 0)
-        // {
-        //     auto &cfg = GlobalConfig::getInstance();
-        //     cfg.logger_->error("baseband: open('{}') failed: {} (errno={})", filepath.string(), std::strerror(errno), errno);
-        //     return -1;
-        // }
         return 0;
     }
 
@@ -220,7 +185,6 @@ public:
     void recoder()
     {
         auto &cfg = GlobalConfig::getInstance();
-        // std::cout<<cfg.Baseband_bits<<std::endl;
         PacketBatch *readblock = nullptr;
         m_queue->wait_dequeue(readblock);
         const int frames_to_write = readblock->count;
@@ -294,14 +258,13 @@ baseband::baseband(int stream_id): m_stream_id(stream_id)
     m_queue = &cfg.streams[m_stream_id].queue;
     m_subband_id = m_stream_id/2;
 
-    // m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
     if (m_subband_id < 4)
         m_folder = cfg.Baseband_folder0;
     else
         m_folder = cfg.Baseband_folder1;
     if (create_file() != 0)
     {
-        // best-effort logging; constructor cannot throw per your preference
+        // Keep construction alive so the receive thread can report later errors.
         cfg.logger_->error("baseband: initial create_file failed for subband {}", m_subband_id);
     }
 }
@@ -309,5 +272,4 @@ baseband::baseband(int stream_id): m_stream_id(stream_id)
 baseband::~baseband()
 {
     if (fd >= 0)close(fd);
-    // if (fd_y >= 0)close(fd_y);
 }
