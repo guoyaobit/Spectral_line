@@ -10,8 +10,10 @@ catch-all DPDK drop rule on each input port.
 
 The runtime layout is fixed in the current source: two physical DPDK ports,
 eight queues per port, and up to eight subbands (two polarisation streams per
-subband). The configured `subbands[].port` is the output UDP port for spectral
-results; input flow rules currently listen on UDP ports 60000 through 60007.
+subband). Spectrum results leave through a kernel-managed SR-IOV virtual
+function (VF), selected in `Sender_Nic`. Each configured `subbands[].port` is
+the destination UDP port on `Storage_node_ip`; it is not the local source port.
+Input flow rules currently listen on UDP ports 60000 through 60007.
 
 ## Host prerequisites
 
@@ -22,6 +24,8 @@ results; input flow rules currently listen on UDP ports 60000 through 60007.
 - Two receive NIC ports supported by DPDK and bound to a userspace driver such
   as `vfio-pci`; huge pages and sufficient locked memory for DPDK/CUDA pinned
   buffers.
+- A separate SR-IOV VF for spectrum-result transmission. It must remain bound
+  to its Linux kernel driver and have connectivity to the storage node.
 - Disk capacity and write bandwidth appropriate for baseband mode. Baseband
   files are rotated at 8 GiB per stream.
 
@@ -41,8 +45,9 @@ meson --version
 1. Reserve huge pages according to the DPDK documentation and mount hugetlbfs.
 2. Record the NIC's PCI addresses and current driver using
    `dpdk-devbind.py --status`.
-3. Bind only the dedicated receive NIC ports to `vfio-pci`. Do not bind the NIC
-   carrying the SSH session used to administer the server.
+3. Bind only the dedicated receive NIC ports to `vfio-pci`. Do not bind the
+   SR-IOV VF named by `Sender_Nic`, or the NIC carrying the SSH session, to
+   DPDK.
 4. Give the service account access to `/dev/vfio/*`, huge pages, and enough
    `memlock` allowance; alternatively run under a controlled service with the
    required capabilities.
@@ -74,8 +79,13 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
 - `integration_t`, `win_bw`, and `win_channels`: determine FFT length and
   integration. The computed FFT length must be a multiple of 4096 and at least
   65536.
-- `Storage_node_ip`, `Storage_node_mac`, `Sender_Nic`: destination and outgoing
-  interface for spectral packets. Confirm these values on the deployment host.
+- `Storage_node_ip` and `Storage_node_mac`: address of the result receiver.
+- `Sender_Nic`: name of the kernel-managed SR-IOV VF used to reach the result
+  receiver; the example configuration uses `ens81f0v0`. The current code uses
+  this name when installing the permanent neighbour entry. Linux routing must
+  also select this VF for `Storage_node_ip`.
+- `subbands[].port`: destination UDP port on `Storage_node_ip` for that
+  subband's spectrum results. It does not configure a local source port.
 - `Baseband_Folder0`/`Baseband_Folder1`: writable high-throughput filesystems
   used only in baseband mode.
 - `Baseband_bits`: `8`, `4`, or `2`. For 4-bit and 2-bit output, the program
@@ -86,6 +96,15 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
 
 Ensure every enabled subband maps to an available GPU and that all configured
 spectrum windows lie within its subband.
+
+Before starting the receiver, verify the result path (substitute the configured
+address and interface if they differ):
+
+```sh
+ip link show ens81f0v0
+ip route get 192.168.101.3
+ip neigh show 192.168.101.3 dev ens81f0v0
+```
 
 ## Start and validate
 

@@ -11,6 +11,7 @@ noise_source:
 integration_t: 1 # Intergration time s
 win_bw: 256e6 # window bandwidth hz 1e6,2e6,4e6,32e6,64e6
 win_channels: 65536 # window channels  32768,65536
+# Spectrum result destination. Sender_Nic is a kernel-managed SR-IOV VF.
 Storage_node_ip: 192.168.101.3
 Storage_node_mac: 0c:42:a1:78:84:e4
 Sender_Nic: ens81f0v0
@@ -22,8 +23,9 @@ Baseband_Folder1: /data1
 Baseband_bits: 8
 subband_monitor: true
 subbands:
+  # port is the destination UDP port on Storage_node_ip for spectrum results.
   # recv dest port from FPGA is  60000,60001
-  # send to master node port from 60000
+  # send to the storage node destination port 60000
   #  subband 0
   - gpu_id: 0
     enable: true
