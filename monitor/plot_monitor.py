@@ -19,6 +19,16 @@ import numpy as np
 from PIL import Image
 
 
+try:
+    THUMBNAIL_RESAMPLE = Image.Resampling.LANCZOS
+except AttributeError:
+    # Pillow before 9.1 exposes resampling filters directly on Image.
+    try:
+        THUMBNAIL_RESAMPLE = Image.LANCZOS
+    except AttributeError:
+        THUMBNAIL_RESAMPLE = Image.ANTIALIAS
+
+
 MONITOR_DIR = Path("/dev/shm")
 OUTPUT_DIR = MONITOR_DIR / "monitor_plots"
 STREAM_PATTERN = "server_*_stream_*.bin"
@@ -119,7 +129,7 @@ def save_versions(figure, output_dir, name):
             facecolor="white",
         )
         with Image.open(high_temporary) as image:
-            image.thumbnail(THUMBNAIL_PIXELS, Image.Resampling.LANCZOS)
+            image.thumbnail(THUMBNAIL_PIXELS, THUMBNAIL_RESAMPLE)
             image.save(thumbnail_temporary, format="PNG", optimize=True)
 
         # Each file is always complete when it becomes visible to readers.
