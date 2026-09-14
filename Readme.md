@@ -7,6 +7,9 @@ and either sends spectrum windows over UDP or records VDIF baseband files.
 See [docs/deployment.md](docs/deployment.md) for host preparation, build,
 configuration, and start-up checks.
 
+To deploy and compile the controller's source tree on multiple servers, use
+the included [Ansible playbook](ansible/README.md).
+
 To inspect an 8-bit VDIF output file with DiFX tools:
 
 ```sh

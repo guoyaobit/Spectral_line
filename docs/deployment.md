@@ -69,6 +69,29 @@ The executable is `build/7mm`. If CUDA is not installed under
 `/usr/local/cuda/lib64`, adjust the `cudart`/`cufft` lookup paths in
 `meson.build` instead of copying libraries.
 
+## Deploy and build multiple servers with Ansible
+
+The repository includes `ansible/deploy.yml` for packaging the controller's
+current source tree, distributing it to the `spectral_line_servers` inventory
+group, preparing each host, and compiling the program. Targets execute
+independently, so a slow build does not hold up other hosts.
+
+Copy and edit the inventory, verify SSH connectivity, and run the playbook:
+
+```sh
+cp ansible/inventory.example.yml ansible/inventory.yml
+ansible -i ansible/inventory.yml spectral_line_servers -m ping
+ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
+```
+
+The playbook installs DPDK and the apt build dependencies, writes a dedicated
+GRUB drop-in for huge pages and IOMMU, runs `update-grub`, deploys the local
+source under `/opt/Spectral_line`, and produces `/opt/Spectral_line/build/7mm`.
+Review the huge-page count and Intel/AMD IOMMU selection in the inventory
+before running it. A reboot is required when GRUB changes, but the playbook
+does not reboot or start the receiver automatically. See `ansible/README.md`
+for variables, password authentication, and operational details.
+
 ## Configure
 
 Copy and edit `config.yaml` for the observing setup. Important fields:
