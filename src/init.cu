@@ -258,12 +258,5 @@ int init() {
     }
   }
 
-  // Remove stale monitor files before receiving new frames.
-  for (int stream_id = 0; stream_id < cfg.max_streams; ++stream_id) {
-    std::string path = "/dev/shm/server_" + std::to_string(cfg.ServerID) +
-                       "_stream_" + std::to_string(stream_id) + ".bin";
-
-    unlink(path.c_str());
-  }
   return 0;
 }
