@@ -19,8 +19,8 @@ m5test <file> VDIF_8192_62500m1-8-1
 Install the monitor dependencies and start the continuous image generator:
 
 ```sh
-python -m pip install -r requirements-monitor.txt
-python plot_monitor.py
+python -m pip install -r monitor/requirements.txt
+python monitor/plot_monitor.py
 ```
 
 With no arguments, the script continuously scans
@@ -28,8 +28,12 @@ With no arguments, the script continuously scans
 simultaneously regenerate its three 300-DPI images and three 320x120 thumbnails
 under `/dev/shm/monitor_plots/`. Thumbnails are downscaled from the high-quality
 render instead of being plotted a second time. Images are replaced atomically,
-so readers never observe partially written PNGs. Run `python plot_monitor.py
---once` for a single update.
+so readers never observe partially written PNGs. Run
+`python monitor/plot_monitor.py --once` for a single update.
+
+The receiver creates a stream's monitor file only after that stream receives
+its first valid packet. Missing-input streams therefore do not appear as empty
+or zero-filled monitor files.
 
 The monitor supports all 16 streams updating in the same cycle. By default it
 uses up to 16 rendering processes, capped by the host's logical CPU count. Set

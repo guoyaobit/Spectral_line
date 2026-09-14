@@ -215,15 +215,36 @@
           - spectral_line_executable.stat.isreg
         fail_msg: The build completed without producing the 7mm executable.
 
+    - name: Install systemd service units
+      ansible.builtin.copy:
+        src: "{{ spectral_line_install_dir }}/systemd/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - spectral-line.service
+        - spectral-line-monitor.service
+      notify: Reload systemd
+
+    - name: Apply installed systemd units
+      ansible.builtin.meta: flush_handlers
+
     - name: Report deployment result
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }} compiled
-          {{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm
+          {{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm;
+          service units are installed but not enabled or started
 
   handlers:
     - name: Regenerate GRUB configuration
       ansible.builtin.command: update-grub
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
 
 - name: Remove the controller source archive
   hosts: localhost

@@ -2,8 +2,8 @@
 
 The playbook packages the source tree already present on the controller, sends
 the same archive to every server, installs DPDK and build dependencies, updates
-GRUB for huge pages and IOMMU, and compiles the receiver. It does not require
-the target servers to access GitHub.
+GRUB for huge pages and IOMMU, compiles the receiver, and installs its systemd
+units. It does not require the target servers to access GitHub.
 
 Hosts execute independently with Ansible's `free` strategy. The default five
 Ansible forks are sufficient for most clusters in this project's expected
@@ -46,6 +46,9 @@ Review these group variables before deployment:
   `/opt/Spectral_line`.
 - `spectral_line_build_dir`: Meson build directory; default `build`.
 
+The supplied service units use `/opt/Spectral_line`. If the installation
+directory is overridden, update the paths in `systemd/*.service` as well.
+
 Use SSH keys or Ansible Vault for credentials. Do not store SSH passwords,
 private keys, sudo passwords, or GitHub tokens in the inventory file. For SSH
 password authentication, prompt at runtime:
@@ -79,5 +82,18 @@ ansible -i ansible/inventory.yml spectral_line_servers \
 ```
 
 After the build, the default executable path on every server is
-`/opt/Spectral_line/build/7mm`. The playbook does not start the receiver or
-change NIC bindings, SR-IOV configuration, or `config.yaml` values.
+`/opt/Spectral_line/build/7mm`. The playbook installs and reloads
+`spectral-line.service` and `spectral-line-monitor.service`, but does not enable
+or start either service. It also does not change NIC bindings, SR-IOV
+configuration, or `config.yaml` values.
+
+After rebooting and checking the NIC and configuration, enable and start the
+receiver on the cluster:
+
+```sh
+ansible -i ansible/inventory.yml spectral_line_servers --become \
+  -m ansible.builtin.systemd_service \
+  -a "name=spectral-line.service enabled=true state=started"
+```
+
+Use `state=stopped` to stop it on every server.

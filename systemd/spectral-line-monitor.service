@@ -10,7 +10,9 @@ WorkingDirectory=/opt/Spectral_line
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=-/etc/default/spectral-line-monitor
 ExecStartPre=+/usr/bin/install -d -o spectral-line -g spectral-line -m 0755 /dev/shm/monitor_plots
-ExecStart=/opt/Spectral_line/.venv/bin/python /opt/Spectral_line/plot_monitor.py
+ExecStart=/opt/Spectral_line/.venv/bin/python /opt/Spectral_line/monitor/plot_monitor.py
+StandardOutput=journal
+StandardError=journal
 Restart=on-failure
 RestartSec=2
 KillMode=control-group

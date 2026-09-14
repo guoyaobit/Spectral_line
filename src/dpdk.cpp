@@ -5,6 +5,8 @@
 #include <unistd.h>
 
 #include <Globalcfg.hpp>
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <iostream>
 #include <rte_common.h>
@@ -207,30 +209,8 @@ static int recv2mem(void *args) {
                                   std::to_string(stream_id) + ".bin";
 
   constexpr size_t MONITOR_SIZE = 32 + 8192;
-
-  int fd = open(monitor_data_path.c_str(), O_RDWR | O_CREAT, 0666);
-
-  if (fd < 0) {
-    perror("open monitor file");
-    return -1;
-  }
-
-  if (ftruncate(fd, MONITOR_SIZE) != 0) {
-    perror("ftruncate monitor file");
-    close(fd);
-    return -1;
-  }
-
-  void *monitor_map =
-      mmap(nullptr, MONITOR_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-
-  if (monitor_map == MAP_FAILED) {
-    perror("mmap monitor file");
-    close(fd);
-    return -1;
-  }
-
-  auto *monitor_ptr = static_cast<uint8_t *>(monitor_map);
+  int monitor_fd = -1;
+  uint8_t *monitor_ptr = nullptr;
   while (1) {
     /*
      * =========================================================
@@ -309,9 +289,41 @@ static int recv2mem(void *args) {
        * subband monitor
        * =====================================================
        */
-      if (unlikely(cfg.subband_monitor && m_seconds % 2 == 0 &&
-                   m_frame_number == 0)) {
-        rte_memcpy(monitor_ptr, vdif_ptr, 8224);
+      const bool first_monitor_frame = monitor_ptr == nullptr;
+      const bool scheduled_monitor_frame =
+          m_seconds % 2 == 0 && m_frame_number == 0;
+      if (unlikely(cfg.subband_monitor &&
+                   (first_monitor_frame || scheduled_monitor_frame))) {
+        if (first_monitor_frame) {
+          monitor_fd =
+              open(monitor_data_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0666);
+          if (monitor_fd < 0) {
+            cfg.logger_->error("Cannot create monitor file {}: {}",
+                               monitor_data_path, std::strerror(errno));
+            return -1;
+          }
+
+          if (ftruncate(monitor_fd, MONITOR_SIZE) != 0) {
+            cfg.logger_->error("Cannot resize monitor file {}: {}",
+                               monitor_data_path, std::strerror(errno));
+            close(monitor_fd);
+            unlink(monitor_data_path.c_str());
+            return -1;
+          }
+
+          void *monitor_map = mmap(nullptr, MONITOR_SIZE,
+                                   PROT_READ | PROT_WRITE, MAP_SHARED,
+                                   monitor_fd, 0);
+          if (monitor_map == MAP_FAILED) {
+            cfg.logger_->error("Cannot map monitor file {}: {}",
+                               monitor_data_path, std::strerror(errno));
+            close(monitor_fd);
+            unlink(monitor_data_path.c_str());
+            return -1;
+          }
+          monitor_ptr = static_cast<uint8_t *>(monitor_map);
+        }
+        rte_memcpy(monitor_ptr, vdif_ptr, MONITOR_SIZE);
       }
 
       /*

@@ -86,11 +86,13 @@ ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 
 The playbook installs DPDK and the apt build dependencies, writes a dedicated
 GRUB drop-in for huge pages and IOMMU, runs `update-grub`, deploys the local
-source under `/opt/Spectral_line`, and produces `/opt/Spectral_line/build/7mm`.
+source under `/opt/Spectral_line`, produces `/opt/Spectral_line/build/7mm`, and
+installs the receiver and monitor systemd units.
 Review the huge-page count and Intel/AMD IOMMU selection in the inventory
 before running it. A reboot is required when GRUB changes, but the playbook
-does not reboot or start the receiver automatically. See `ansible/README.md`
-for variables, password authentication, and operational details.
+does not reboot, enable, or start either service automatically. See
+`ansible/README.md` for variables, password authentication, and operational
+details.
 
 ## Configure
 
@@ -129,13 +131,38 @@ ip route get 192.168.101.3
 ip neigh show 192.168.101.3 dev ens81f0v0
 ```
 
-## Start and validate
+## Install the receiver as a systemd service
 
-Run from the directory containing `config.yaml`:
+The supplied unit runs the receiver from `/opt/Spectral_line`, where it finds
+`config.yaml` and writes its log files. Install the unit after compiling:
 
 ```sh
-./build/7mm
+sudo install -m 0644 systemd/spectral-line.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable spectral-line.service
+sudo systemctl start spectral-line.service
 ```
+
+Control and inspect the receiver with standard systemd commands:
+
+```sh
+sudo systemctl stop spectral-line.service
+sudo systemctl restart spectral-line.service
+sudo systemctl status spectral-line.service
+sudo journalctl -u spectral-line.service -f
+```
+
+`systemctl status` shows the service state and recent log lines. Use
+`journalctl -u spectral-line.service` for the complete journal, `-f` to follow
+new messages, or `--since today` to limit the time range. Receiver logs are
+written to both the systemd journal and timestamped `log_*.log` files under
+`/opt/Spectral_line`.
+
+The receiver unit runs as root because DPDK/VFIO access and the current static
+neighbor setup require elevated privileges. Do not start it until the required
+GRUB reboot, huge pages, NIC binding, and `config.yaml` checks are complete.
+
+## Start and validate
 
 Before an observation, verify:
 
@@ -151,7 +178,10 @@ Before an observation, verify:
 
 Logs are written to `log_YYYY-MM-DD_HH-MM-SS.log` in the working directory.
 The optional subband monitor publishes a recent VDIF frame to
-`/dev/shm/server_<ServerID>_stream_<stream>.bin`.
+`/dev/shm/server_<ServerID>_stream_<stream>.bin`. A file is created only after
+its stream receives a valid packet; a subband with no input does not produce a
+misleading empty monitor file. Files left by an earlier receiver process are
+removed during the next receiver initialization.
 
 ## Install the monitor as a systemd service
 
@@ -162,7 +192,7 @@ and a service account named `spectral-line`:
 ```sh
 sudo useradd --system --home-dir /opt/Spectral_line --shell /usr/sbin/nologin spectral-line
 sudo python3 -m venv /opt/Spectral_line/.venv
-sudo /opt/Spectral_line/.venv/bin/pip install -r /opt/Spectral_line/requirements-monitor.txt
+sudo /opt/Spectral_line/.venv/bin/pip install -r /opt/Spectral_line/monitor/requirements.txt
 sudo install -m 0644 systemd/spectral-line-monitor.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now spectral-line-monitor.service
@@ -193,15 +223,19 @@ After updating the repository, refresh the environment and restart only the
 monitor service:
 
 ```sh
-sudo /opt/Spectral_line/.venv/bin/pip install -r /opt/Spectral_line/requirements-monitor.txt
+sudo /opt/Spectral_line/.venv/bin/pip install -r /opt/Spectral_line/monitor/requirements.txt
 sudo systemctl restart spectral-line-monitor.service
 sudo journalctl -u spectral-line-monitor.service -f
 ```
 
+The monitor's standard output and errors are also stored in the systemd
+journal under `spectral-line-monitor.service`.
+
 ## Operational cautions
 
-- The main processing and receive loops run indefinitely. Use a supervisor and
-  a defined shutdown procedure for production observations.
+- The main processing and receive loops run indefinitely. Stop them through
+  `systemctl stop spectral-line.service`; systemd terminates the complete
+  process control group if the receiver does not exit within the stop timeout.
 - CUDA host allocation and DPDK huge-page allocation can fail independently;
   monitor both host memory and GPU memory.
 - Test a configuration change with recorded traffic before applying it to a

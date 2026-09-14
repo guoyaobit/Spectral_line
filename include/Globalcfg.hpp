@@ -3,7 +3,7 @@
 #include "readerwritercircularbuffer.h"
 #include "readerwriterqueue.h"
 #include "spdlog/async.h"
-#include "spdlog/sinks/stdout_color_sinks.h"
+#include "spdlog/sinks/stdout_sinks.h"
 #include "spdlog/spdlog.h"
 #include <SpectrumSender.hpp>
 #include <cmath>
@@ -94,9 +94,12 @@ public:
 
     auto file_sink =
         std::make_shared<spdlog::sinks::basic_file_sink_mt>(logfile, true);
+    auto stdout_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();
+    std::vector<spdlog::sink_ptr> log_sinks{file_sink, stdout_sink};
 
     logger_ = std::make_shared<spdlog::async_logger>(
-        "async_logger", file_sink, spdlog::thread_pool(),
+        "async_logger", log_sinks.begin(), log_sinks.end(),
+        spdlog::thread_pool(),
         spdlog::async_overflow_policy::block);
 
     spdlog::set_default_logger(logger_);
