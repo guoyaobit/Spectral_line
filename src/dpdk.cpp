@@ -211,6 +211,7 @@ static int recv2mem(void *args) {
   constexpr size_t MONITOR_SIZE = 32 + 8192;
   int monitor_fd = -1;
   uint8_t *monitor_ptr = nullptr;
+  bool monitor_file_initialized = false;
   while (1) {
     /*
      * =========================================================
@@ -289,12 +290,11 @@ static int recv2mem(void *args) {
        * subband monitor
        * =====================================================
        */
-      const bool first_monitor_frame = monitor_ptr == nullptr;
       const bool scheduled_monitor_frame =
           m_seconds % 2 == 0 && m_frame_number == 0;
       if (unlikely(cfg.subband_monitor &&
-                   (first_monitor_frame || scheduled_monitor_frame))) {
-        if (first_monitor_frame) {
+                   (!monitor_file_initialized || scheduled_monitor_frame))) {
+        if (!monitor_file_initialized) {
           monitor_fd =
               open(monitor_data_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0666);
           if (monitor_fd < 0) {
@@ -322,6 +322,7 @@ static int recv2mem(void *args) {
             return -1;
           }
           monitor_ptr = static_cast<uint8_t *>(monitor_map);
+          monitor_file_initialized = true;
         }
         rte_memcpy(monitor_ptr, vdif_ptr, MONITOR_SIZE);
       }
