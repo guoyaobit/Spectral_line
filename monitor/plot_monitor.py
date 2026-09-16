@@ -99,7 +99,8 @@ def read_monitor_snapshot(filename, retries=5, retry_delay=0.01):
 
 def decode_adc(snapshot):
     payload = snapshot[HEADER_SIZE:HEADER_SIZE + PAYLOAD_SIZE]
-    adc = np.frombuffer(payload, dtype=np.int8)
+    adc = np.frombuffer(payload, dtype=np.uint8).astype(np.float32) - 128.0
+    #adc = float(adc)-128
     return adc[1::2], adc[0::2]
 
 
@@ -153,7 +154,7 @@ def render_adc(real, imag, output_dir, prefix):
         axes.set_title("Raw ADC Samples")
         axes.set_xlabel("Time (us)")
         axes.set_ylabel("ADC value")
-        axes.set_ylim(-132, 132)
+        #axes.set_ylim(-132, 132)
         axes.grid(alpha=0.3)
         axes.legend(loc="upper right", ncol=2)
         figure.tight_layout()
@@ -197,7 +198,7 @@ def render_histogram(real, imag, output_dir, prefix):
             alpha=0.55,
             label="Real",
             color="tab:blue",
-        )
+                )
         axes.hist(
             imag,
             bins=bins,
@@ -220,6 +221,7 @@ def render_histogram(real, imag, output_dir, prefix):
 
 def render_stream(prefix, snapshot, output_dir):
     real, imag = decode_adc(snapshot)
+    
     saved = []
     saved.extend(render_adc(real, imag, output_dir, prefix))
     saved.extend(render_fft(real, imag, output_dir, prefix))
