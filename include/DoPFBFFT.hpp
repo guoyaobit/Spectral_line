@@ -528,7 +528,7 @@ public:
       if (m_noise_state == NoiseState::ON) {
         if(m_acc_on_id == 0)
         {
-          m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
+          m_acc_on_first_timestamp_ns = m_timestamp_ns;
         }
         m_acc_on_id++;
         if(cfg.observation_mode == ObservationMode::SPECTRAL)
@@ -540,6 +540,8 @@ public:
          * Publish after one full ON integration.
          */
         if (m_acc_on_id >= m_acc_len) {
+          m_hring[m_hhead].first_timestamp_ns =
+              m_acc_on_first_timestamp_ns;
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
           if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
             cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
@@ -558,6 +560,7 @@ public:
           cudaMemsetAsync(d_sumPower_ON, 0, sizeof(float), sD2H);
 
           m_acc_on_id = 0;
+          m_acc_on_first_timestamp_ns = 0;
 
           m_hhead = (m_hhead + 1) % NUM_SLOTS;
         }
@@ -569,7 +572,7 @@ public:
       else {
         if(m_acc_off_id == 0)
         {
-          m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
+          m_acc_off_first_timestamp_ns = m_timestamp_ns;
         }
         m_acc_off_id++;
         if(cfg.observation_mode == ObservationMode::SPECTRAL)
@@ -581,6 +584,8 @@ public:
          * Publish after one full OFF integration.
          */
         if (m_acc_off_id >= m_acc_len) {
+          m_hring[m_hhead].first_timestamp_ns =
+              m_acc_off_first_timestamp_ns;
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
 
           if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
@@ -601,6 +606,7 @@ public:
           cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(float), sD2H);
 
           m_acc_off_id = 0;
+          m_acc_off_first_timestamp_ns = 0;
 
           m_hhead = (m_hhead + 1) % NUM_SLOTS;
         }
@@ -694,4 +700,6 @@ private:
   uint64_t m_noise_cycle_start_ns = 0;
   uint32_t m_acc_on_id = 0;
   uint32_t m_acc_off_id = 0;
+  uint64_t m_acc_on_first_timestamp_ns = 0;
+  uint64_t m_acc_off_first_timestamp_ns = 0;
 };
