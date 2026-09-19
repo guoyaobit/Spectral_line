@@ -84,17 +84,19 @@ ansible -i ansible/inventory.yml spectral_line_servers -m ping
 ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 ```
 
-The playbook installs DPDK and the apt build dependencies, deploys the
+The playbook installs the non-DPDK apt build dependencies, deploys the
 controller's local source under `/opt/Spectral_line`, produces
 `/opt/Spectral_line/build/7mm`, creates the monitor virtual environment, and
 enables and starts the receiver and monitor systemd services. On subsequent
 deployments it stops both services before the update and starts them again after
 a successful build.
 
-The playbook deliberately does not manage GRUB, kernel command-line options,
-huge pages, IOMMU, NIC bindings, or host reboots. Prepare and validate those
-DPDK prerequisites separately before running it. See `ansible/README.md` for
-variables, password authentication, and operational details.
+The playbook deliberately does not install or upgrade DPDK and does not manage
+GRUB, kernel command-line options, huge pages, IOMMU, NIC bindings, or host
+reboots. Install the DPDK runtime and development files and prepare the other
+DPDK prerequisites separately before running it. The deployment fails at its
+preflight check if `pkg-config` cannot find `libdpdk`. See `ansible/README.md`
+for variables, password authentication, and operational details.
 
 ## Configure
 

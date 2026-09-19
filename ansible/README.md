@@ -1,8 +1,8 @@
 # Ansible cluster deployment
 
 The playbook packages the source tree already present on the controller, sends
-the same archive to every server, installs DPDK and build dependencies, compiles
-the receiver, creates the monitor Python environment, and deploys both
+the same archive to every server, installs the non-DPDK build dependencies,
+compiles the receiver, creates the monitor Python environment, and deploys both
 components as enabled systemd services. It does not require the target servers
 to access GitHub.
 
@@ -23,11 +23,14 @@ Targets:
 
 - Debian or Ubuntu with access to its configured apt repositories.
 - A compatible NVIDIA driver and CUDA toolkit under `/usr/local/cuda`.
+- A preinstalled DPDK development environment discoverable as `libdpdk` through
+  `pkg-config`.
 - Enough RAM and reserved huge-page capacity for the selected receiver setup.
 
-The playbook installs DPDK, Meson, Ninja, a C++ toolchain, and the required apt
-development libraries. CUDA is intentionally not installed automatically
-because the correct driver/toolkit version depends on each GPU and host OS.
+The playbook installs Meson, Ninja, a C++ toolchain, and the remaining required
+apt development libraries. DPDK and CUDA are intentionally not installed or
+upgraded automatically because their versions depend on each host's NIC, GPU,
+driver, and operating system.
 
 ## Configure the inventory
 

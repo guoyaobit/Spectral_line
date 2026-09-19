@@ -54,14 +54,11 @@
           - ansible_os_family == "Debian"
         fail_msg: This playbook currently supports Debian and Ubuntu targets.
 
-    - name: Install DPDK and build dependencies
+    - name: Install build dependencies
       apt:
         name:
           - build-essential
-          - dpdk
-          - dpdk-dev
           - git
-          - libdpdk-dev
           - libelf-dev
           - libfmt-dev
           - libnuma-dev
