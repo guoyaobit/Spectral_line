@@ -19,6 +19,7 @@
           - tar
           - --exclude=.git
           - --exclude=build
+          - --exclude=.venv
           - --exclude=ansible/inventory.yml
           - --exclude=__pycache__
           - --exclude=*.log
@@ -42,9 +43,6 @@
     spectral_line_install_dir: /opt/Spectral_line
     spectral_line_build_dir: build
     spectral_line_service_user: spectral-line
-    spectral_line_hugepage_size: 1G
-    spectral_line_hugepages: 16
-    spectral_line_iommu_vendor: intel
     spectral_line_build_environment:
       PATH: "/usr/local/cuda/bin:{{ ansible_env.PATH }}"
 
@@ -55,16 +53,6 @@
           - ansible_system == "Linux"
           - ansible_os_family == "Debian"
         fail_msg: This playbook currently supports Debian and Ubuntu targets.
-
-    - name: Validate boot configuration variables
-      ansible.builtin.assert:
-        that:
-          - spectral_line_hugepages | int > 0
-          - spectral_line_hugepage_size in ["1G", "2M"]
-          - spectral_line_iommu_vendor in ["intel", "amd"]
-        fail_msg: >-
-          Set a positive huge-page count, a 1G or 2M page size, and an IOMMU
-          vendor of intel or amd.
 
     - name: Install DPDK and build dependencies
       ansible.builtin.apt:
@@ -83,43 +71,13 @@
           - meson
           - ninja-build
           - pkg-config
+          - python3-pip
           - python3-pyelftools
+          - python3-setuptools
+          - python3-venv
         state: present
         update_cache: true
         cache_valid_time: 3600
-
-    - name: Create the GRUB drop-in directory
-      ansible.builtin.file:
-        path: /etc/default/grub.d
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Write DPDK kernel boot parameters
-      ansible.builtin.copy:
-        dest: /etc/default/grub.d/90-spectral-line.cfg
-        owner: root
-        group: root
-        mode: "0644"
-        content: >-
-          GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT}
-          default_hugepagesz={{ spectral_line_hugepage_size }}
-          hugepagesz={{ spectral_line_hugepage_size }}
-          hugepages={{ spectral_line_hugepages }} iommu=pt
-          {{ 'intel_iommu=on' if spectral_line_iommu_vendor == 'intel' else 'amd_iommu=on' }}"
-      register: spectral_line_grub
-      notify: Regenerate GRUB configuration
-
-    - name: Apply the GRUB configuration before compilation
-      ansible.builtin.meta: flush_handlers
-
-    - name: Report required reboot
-      ansible.builtin.debug:
-        msg: >-
-          GRUB changed on {{ inventory_hostname }}. Reboot this server before
-          running the DPDK receiver; this playbook does not reboot automatically.
-      when: spectral_line_grub.changed
 
     - name: Create the service group
       ansible.builtin.group:
@@ -142,6 +100,18 @@
         owner: "{{ spectral_line_service_user }}"
         group: "{{ spectral_line_service_user }}"
         mode: "0755"
+
+    - name: Collect installed service facts
+      ansible.builtin.service_facts:
+
+    - name: Stop the installed services before replacing their files
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - spectral-line.service
+        - spectral-line-monitor.service
+      when: item in ansible_facts.services
 
     - name: Deploy the controller source archive
       ansible.builtin.unarchive:
@@ -215,11 +185,26 @@
           - spectral_line_executable.stat.isreg
         fail_msg: The build completed without producing the 7mm executable.
 
+    - name: Create the monitor Python virtual environment
+      become_user: "{{ spectral_line_service_user }}"
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -m
+          - venv
+          - "{{ spectral_line_install_dir }}/.venv"
+        creates: "{{ spectral_line_install_dir }}/.venv/bin/python"
+
+    - name: Install monitor Python dependencies
+      become_user: "{{ spectral_line_service_user }}"
+      ansible.builtin.pip:
+        requirements: "{{ spectral_line_install_dir }}/monitor/requirements.txt"
+        executable: "{{ spectral_line_install_dir }}/.venv/bin/pip"
+
     - name: Install systemd service units
-      ansible.builtin.copy:
-        src: "{{ spectral_line_install_dir }}/systemd/{{ item }}"
+      ansible.builtin.template:
+        src: "templates/{{ item }}.j2"
         dest: "/etc/systemd/system/{{ item }}"
-        remote_src: true
         owner: root
         group: root
         mode: "0644"
@@ -231,17 +216,27 @@
     - name: Apply installed systemd units
       ansible.builtin.meta: flush_handlers
 
+    - name: Enable and start the monitor service
+      ansible.builtin.systemd_service:
+        name: spectral-line-monitor.service
+        enabled: true
+        state: started
+
+    - name: Enable and start the receiver service
+      ansible.builtin.systemd_service:
+        name: spectral-line.service
+        enabled: true
+        state: started
+
     - name: Report deployment result
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }} compiled
           {{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm;
-          service units are installed but not enabled or started
+          the monitor service is enabled and running;
+          the receiver service is enabled and running
 
   handlers:
-    - name: Regenerate GRUB configuration
-      ansible.builtin.command: update-grub
-
     - name: Reload systemd
       ansible.builtin.systemd_service:
         daemon_reload: true

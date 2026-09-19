@@ -2,11 +2,6 @@
 all:
   children:
     spectral_line_servers:
-      vars:
-        # Adjust these values for the cluster before running the playbook.
-        spectral_line_hugepage_size: 1G
-        spectral_line_hugepages: 16
-        spectral_line_iommu_vendor: intel
       hosts:
         receiver-01:
           ansible_host: 192.0.2.11

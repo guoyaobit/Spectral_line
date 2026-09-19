@@ -1,9 +1,10 @@
 # Ansible cluster deployment
 
 The playbook packages the source tree already present on the controller, sends
-the same archive to every server, installs DPDK and build dependencies, updates
-GRUB for huge pages and IOMMU, compiles the receiver, and installs its systemd
-units. It does not require the target servers to access GitHub.
+the same archive to every server, installs DPDK and build dependencies, compiles
+the receiver, creates the monitor Python environment, and deploys both
+components as enabled systemd services. It does not require the target servers
+to access GitHub.
 
 Hosts execute independently with Ansible's `free` strategy. The default five
 Ansible forks are sufficient for most clusters in this project's expected
@@ -37,17 +38,15 @@ cp ansible/inventory.example.yml ansible/inventory.yml
 ansible -i ansible/inventory.yml spectral_line_servers -m ping
 ```
 
-Review these group variables before deployment:
+The deployment variables are:
 
-- `spectral_line_hugepage_size`: `1G` or `2M`; default `1G`.
-- `spectral_line_hugepages`: boot-time huge-page count; default `16`.
-- `spectral_line_iommu_vendor`: `intel` or `amd`; default `intel`.
 - `spectral_line_install_dir`: remote source directory; default
   `/opt/Spectral_line`.
 - `spectral_line_build_dir`: Meson build directory; default `build`.
 
-The supplied service units use `/opt/Spectral_line`. If the installation
-directory is overridden, update the paths in `systemd/*.service` as well.
+The systemd units are rendered from Ansible templates, so overriding
+`spectral_line_install_dir`, `spectral_line_build_dir`, or
+`spectral_line_service_user` also updates their runtime paths and account.
 
 Use SSH keys or Ansible Vault for credentials. Do not store SSH passwords,
 private keys, sudo passwords, or GitHub tokens in the inventory file. For SSH
@@ -67,33 +66,26 @@ ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 ```
 
 The controller creates a temporary archive of its current working tree. It
-excludes `.git`, `build`, log files, Python caches, and the private inventory.
+excludes `.git`, `build`, `.venv`, log files, Python caches, and the private inventory.
 The archive is expanded into `/opt/Spectral_line` on each target, so local
 controller changes are included even when they have not been pushed to GitHub.
 
-The playbook writes `/etc/default/grub.d/90-spectral-line.cfg` and runs
-`update-grub` when that file changes. It does not reboot automatically. Reboot
-every changed server before running the DPDK receiver so the huge-page and
-IOMMU parameters take effect:
-
-```sh
-ansible -i ansible/inventory.yml spectral_line_servers \
-  --become -m reboot
-```
+If the services are already installed, the playbook stops them before replacing
+source files and rebuilding. It then creates `/opt/Spectral_line/.venv`, installs
+`monitor/requirements.txt`, renders the systemd units, and enables both services.
 
 After the build, the default executable path on every server is
-`/opt/Spectral_line/build/7mm`. The playbook installs and reloads
-`spectral-line.service` and `spectral-line-monitor.service`, but does not enable
-or start either service. It also does not change NIC bindings, SR-IOV
-configuration, or `config.yaml` values.
+`/opt/Spectral_line/build/7mm`, and the playbook starts both services. The
+playbook does not manage GRUB, kernel command-line options, huge pages, IOMMU,
+NIC bindings, SR-IOV configuration, reboots, or `config.yaml` values. Prepare
+and validate those host settings before deployment.
 
-After rebooting and checking the NIC and configuration, enable and start the
-receiver on the cluster:
+If a receiver was intentionally stopped, start it on the cluster with:
 
 ```sh
 ansible -i ansible/inventory.yml spectral_line_servers --become \
   -m ansible.builtin.systemd_service \
-  -a "name=spectral-line.service enabled=true state=started"
+  -a "name=spectral-line.service state=started"
 ```
 
 Use `state=stopped` to stop it on every server.

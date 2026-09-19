@@ -1,0 +1,27 @@
+[Unit]
+Description=Spectral line DPDK/CUDA receiver
+Wants=network-online.target
+After=network-online.target local-fs.target
+ConditionPathIsExecutable={{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm
+ConditionPathExists={{ spectral_line_install_dir }}/config.yaml
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory={{ spectral_line_install_dir }}
+EnvironmentFile=-/etc/default/spectral-line
+ExecStart={{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+KillMode=control-group
+LimitMEMLOCK=infinity
+TasksMax=infinity
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

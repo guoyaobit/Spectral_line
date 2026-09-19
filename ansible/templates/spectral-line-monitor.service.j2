@@ -1,0 +1,22 @@
+[Unit]
+Description=Spectral line monitor image generator
+After=local-fs.target
+
+[Service]
+Type=simple
+User={{ spectral_line_service_user }}
+Group={{ spectral_line_service_user }}
+WorkingDirectory={{ spectral_line_install_dir }}
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/default/spectral-line-monitor
+ExecStartPre=+/usr/bin/install -d -o {{ spectral_line_service_user }} -g {{ spectral_line_service_user }} -m 0755 /dev/shm/monitor_plots
+ExecStart={{ spectral_line_install_dir }}/.venv/bin/python {{ spectral_line_install_dir }}/monitor/plot_monitor.py
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=2
+KillMode=control-group
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
