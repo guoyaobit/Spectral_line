@@ -84,7 +84,7 @@ If a receiver was intentionally stopped, start it on the cluster with:
 
 ```sh
 ansible -i ansible/inventory.yml spectral_line_servers --become \
-  -m ansible.builtin.systemd \
+  -m systemd \
   -a "name=spectral-line.service state=started"
 ```
 

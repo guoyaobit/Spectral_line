@@ -8,13 +8,13 @@
 
   tasks:
     - name: Allocate a temporary source archive
-      ansible.builtin.tempfile:
+      tempfile:
         state: file
         suffix: .tar.gz
       register: spectral_line_archive
 
     - name: Archive the local source tree
-      ansible.builtin.command:
+      command:
         argv:
           - tar
           - --exclude=.git
@@ -31,7 +31,7 @@
       changed_when: true
 
     - name: Expose the archive path to target hosts
-      ansible.builtin.set_fact:
+      set_fact:
         spectral_line_local_archive: "{{ spectral_line_archive.path }}"
 
 - name: Prepare, deploy, and build the receiver cluster
@@ -48,14 +48,14 @@
 
   tasks:
     - name: Require a Debian-family Linux target
-      ansible.builtin.assert:
+      assert:
         that:
           - ansible_system == "Linux"
           - ansible_os_family == "Debian"
         fail_msg: This playbook currently supports Debian and Ubuntu targets.
 
     - name: Install DPDK and build dependencies
-      ansible.builtin.apt:
+      apt:
         name:
           - build-essential
           - dpdk
@@ -80,12 +80,12 @@
         cache_valid_time: 3600
 
     - name: Create the service group
-      ansible.builtin.group:
+      group:
         name: "{{ spectral_line_service_user }}"
         system: true
 
     - name: Create the service account
-      ansible.builtin.user:
+      user:
         name: "{{ spectral_line_service_user }}"
         group: "{{ spectral_line_service_user }}"
         system: true
@@ -94,7 +94,7 @@
         shell: /usr/sbin/nologin
 
     - name: Create the installation directory
-      ansible.builtin.file:
+      file:
         path: "{{ spectral_line_install_dir }}"
         state: directory
         owner: "{{ spectral_line_service_user }}"
@@ -102,10 +102,10 @@
         mode: "0755"
 
     - name: Collect installed service facts
-      ansible.builtin.service_facts:
+      service_facts:
 
     - name: Stop the installed services before replacing their files
-      ansible.builtin.systemd:
+      systemd:
         name: "{{ item }}"
         state: stopped
       loop:
@@ -114,7 +114,7 @@
       when: item in ansible_facts.services
 
     - name: Deploy the controller source archive
-      ansible.builtin.unarchive:
+      unarchive:
         src: "{{ hostvars['localhost'].spectral_line_local_archive }}"
         dest: "{{ spectral_line_install_dir }}"
         owner: "{{ spectral_line_service_user }}"
@@ -122,7 +122,7 @@
 
     - name: Verify required build commands and libraries
       become_user: "{{ spectral_line_service_user }}"
-      ansible.builtin.command:
+      command:
         argv: "{{ item }}"
       environment: "{{ spectral_line_build_environment }}"
       loop:
@@ -133,13 +133,13 @@
       changed_when: false
 
     - name: Check whether Meson is configured
-      ansible.builtin.stat:
+      stat:
         path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/build.ninja"
       register: spectral_line_build_config
 
     - name: Configure a new release build
       become_user: "{{ spectral_line_service_user }}"
-      ansible.builtin.command:
+      command:
         argv:
           - meson
           - setup
@@ -151,7 +151,7 @@
 
     - name: Reconfigure an existing release build
       become_user: "{{ spectral_line_service_user }}"
-      ansible.builtin.command:
+      command:
         argv:
           - meson
           - setup
@@ -164,7 +164,7 @@
 
     - name: Compile Spectral_line
       become_user: "{{ spectral_line_service_user }}"
-      ansible.builtin.command:
+      command:
         argv:
           - meson
           - compile
@@ -174,12 +174,12 @@
       environment: "{{ spectral_line_build_environment }}"
 
     - name: Verify the receiver executable
-      ansible.builtin.stat:
+      stat:
         path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm"
       register: spectral_line_executable
 
     - name: Require a compiled receiver executable
-      ansible.builtin.assert:
+      assert:
         that:
           - spectral_line_executable.stat.exists
           - spectral_line_executable.stat.isreg
@@ -187,7 +187,7 @@
 
     - name: Create the monitor Python virtual environment
       become_user: "{{ spectral_line_service_user }}"
-      ansible.builtin.command:
+      command:
         argv:
           - python3
           - -m
@@ -197,12 +197,12 @@
 
     - name: Install monitor Python dependencies
       become_user: "{{ spectral_line_service_user }}"
-      ansible.builtin.pip:
+      pip:
         requirements: "{{ spectral_line_install_dir }}/monitor/requirements.txt"
         executable: "{{ spectral_line_install_dir }}/.venv/bin/pip"
 
     - name: Install systemd service units
-      ansible.builtin.template:
+      template:
         src: "templates/{{ item }}.j2"
         dest: "/etc/systemd/system/{{ item }}"
         owner: root
@@ -214,22 +214,22 @@
       notify: Reload systemd
 
     - name: Apply installed systemd units
-      ansible.builtin.meta: flush_handlers
+      meta: flush_handlers
 
     - name: Enable and start the monitor service
-      ansible.builtin.systemd:
+      systemd:
         name: spectral-line-monitor.service
         enabled: true
         state: started
 
     - name: Enable and start the receiver service
-      ansible.builtin.systemd:
+      systemd:
         name: spectral-line.service
         enabled: true
         state: started
 
     - name: Report deployment result
-      ansible.builtin.debug:
+      debug:
         msg: >-
           {{ inventory_hostname }} compiled
           {{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm;
@@ -238,7 +238,7 @@
 
   handlers:
     - name: Reload systemd
-      ansible.builtin.systemd:
+      systemd:
         daemon_reload: true
 
 - name: Remove the controller source archive
@@ -247,6 +247,6 @@
 
   tasks:
     - name: Delete the temporary archive
-      ansible.builtin.file:
+      file:
         path: "{{ hostvars['localhost'].spectral_line_local_archive }}"
         state: absent
