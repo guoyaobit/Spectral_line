@@ -15,7 +15,7 @@ once.
 
 Controller:
 
-- Ansible Core 2.14 or newer.
+- Ansible Core 2.13 or newer.
 - GNU tar.
 - SSH access to every target through a user that can use `sudo`.
 
@@ -84,7 +84,7 @@ If a receiver was intentionally stopped, start it on the cluster with:
 
 ```sh
 ansible -i ansible/inventory.yml spectral_line_servers --become \
-  -m ansible.builtin.systemd_service \
+  -m ansible.builtin.systemd \
   -a "name=spectral-line.service state=started"
 ```
 

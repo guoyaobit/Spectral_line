@@ -105,7 +105,7 @@
       ansible.builtin.service_facts:
 
     - name: Stop the installed services before replacing their files
-      ansible.builtin.systemd_service:
+      ansible.builtin.systemd:
         name: "{{ item }}"
         state: stopped
       loop:
@@ -217,13 +217,13 @@
       ansible.builtin.meta: flush_handlers
 
     - name: Enable and start the monitor service
-      ansible.builtin.systemd_service:
+      ansible.builtin.systemd:
         name: spectral-line-monitor.service
         enabled: true
         state: started
 
     - name: Enable and start the receiver service
-      ansible.builtin.systemd_service:
+      ansible.builtin.systemd:
         name: spectral-line.service
         enabled: true
         state: started
@@ -238,7 +238,7 @@
 
   handlers:
     - name: Reload systemd
-      ansible.builtin.systemd_service:
+      ansible.builtin.systemd:
         daemon_reload: true
 
 - name: Remove the controller source archive
