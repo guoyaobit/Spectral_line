@@ -138,26 +138,26 @@ The controller contains eight complete, directly editable configuration files:
 does not calculate or merge frequency values during deployment; it validates
 and copies the file matching each host's `spectral_line_server_id`.
 
-| Static file | ServerID | First range (MHz) | Second range (MHz) |
-|---|---:|---:|---:|
-| `GPU0.yaml` | 0 | 384–640 | 640–896 |
-| `GPU1.yaml` | 1 | 896–1152 | 1152–1408 |
-| `GPU2.yaml` | 2 | 1408–1664 | 1664–1920 |
-| `GPU3.yaml` | 3 | 1920–2176 | 2176–2432 |
-| `GPU4.yaml` | 4 | 2432–2688 | 2688–2944 |
-| `GPU5.yaml` | 5 | 2944–3200 | 3200–3456 |
-| `GPU6.yaml` | 6 | 3456–3712 | 3712–3968 |
-| `GPU7.yaml` | 7 | 3968–4224 | 4224–4480 |
+| Static file | ServerID | ETH0 input IPv4 | ETH0 ranges (MHz) | ETH1 input IPv4 | ETH1 ranges (MHz) |
+|---|---:|---|---|---|---|
+| `GPU0.yaml` | 0 | 10.17.16.11 | 384–640, 640–896 | 10.17.16.12 | 896–1152, 1152–1408 |
+| `GPU1.yaml` | 1 | 10.17.16.13 | 1408–1664, 1664–1920 | 10.17.16.14 | 1920–2176, 2176–2432 |
+| `GPU2.yaml` | 2 | 10.17.16.15 | 2432–2688, 2688–2944 | 10.17.16.16 | 2944–3200, 3200–3456 |
+| `GPU3.yaml` | 3 | 10.17.16.17 | 3456–3712, 3712–3968 | 10.17.16.18 | 3968–4224, 4224–4480 |
+| `GPU4.yaml` | 4 | 10.17.16.19 | 384–640, 640–896 | 10.17.16.20 | 896–1152, 1152–1408 |
+| `GPU5.yaml` | 5 | 10.17.16.21 | 1408–1664, 1664–1920 | 10.17.16.22 | 1920–2176, 2176–2432 |
+| `GPU6.yaml` | 6 | 10.17.16.23 | 2432–2688, 2688–2944 | 10.17.16.24 | 2944–3200, 3200–3456 |
+| `GPU7.yaml` | 7 | 10.17.16.25 | 3456–3712, 3712–3968 | 10.17.16.26 | 3968–4224, 4224–4480 |
 
 Each static file defines four 256 MHz subbands per 100G interface in this
 order:
 
 | Input UDP pair | Beam | Polarisation | Frequency selection |
 |---|:---:|:---:|---|
-| 60000/60001 | A | X/Y | first start frequency |
-| 60002/60003 | B | X/Y | first start frequency |
-| 60004/60005 | A | X/Y | second start frequency |
-| 60006/60007 | B | X/Y | second start frequency |
+| 60000/60001 | A | V/H | first start frequency |
+| 60002/60003 | B | V/H | first start frequency |
+| 60004/60005 | A | V/H | second start frequency |
+| 60006/60007 | B | V/H | second start frequency |
 
 Both 100G interfaces therefore produce eight `subbands` entries per server.
 The configured `subbands[].port` values remain outgoing result ports
@@ -207,9 +207,9 @@ access and set `spectral_line_bmc_channel` if the LAN interface is not channel
 1.
 
 Both 100G DPDK ports receive UDP destination ports `60000–60007`. On each
-interface, `60000/60001` are beam A X/Y, `60002/60003` are beam B X/Y,
-`60004/60005` are beam A X/Y for the next frequency range, and `60006/60007`
-are the matching beam B X/Y. DPDK port 0 maps these pairs to subbands 0–3;
+interface, `60000/60001` are beam A V/H, `60002/60003` are beam B V/H,
+`60004/60005` are beam A V/H for the next frequency range, and `60006/60007`
+are the matching beam B V/H. DPDK port 0 maps these pairs to subbands 0–3;
 DPDK port 1 maps them to subbands 4–7. The `subbands[].port` values
 `60000–60007` in `config.yaml` are outgoing result destination ports on
 `Storage_node_ip` and are unrelated to this fixed input mapping despite using

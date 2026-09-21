@@ -26,7 +26,7 @@ subbands:
   # Every `port` value below is the destination UDP port on Storage_node_ip
   # used to send the processed spectrum result. It does NOT configure the
   # fixed 100G DPDK input UDP ports, even though both ranges are 60000-60007.
-  # DPDK port 0, UDP 60000/60001: beam A, X/Y.
+  # DPDK port 0, UDP 60000/60001: beam A, V/H.
   - gpu_id: 0
     enable: true
     beam: A # spectrum_header beam_id=0
@@ -35,7 +35,7 @@ subbands:
     port: 60000 # result destination UDP port
     windows:
       - center_freq: 512e6
-  # DPDK port 0, UDP 60002/60003: beam B, X/Y.
+  # DPDK port 0, UDP 60002/60003: beam B, V/H.
   - gpu_id: 0
     enable: true
     beam: B # spectrum_header beam_id=1
@@ -44,7 +44,7 @@ subbands:
     port: 60001 # result destination UDP port
     windows:
       - center_freq: 512e6
-  # DPDK port 0, UDP 60004/60005: beam A, X/Y.
+  # DPDK port 0, UDP 60004/60005: beam A, V/H.
   - gpu_id: 1
     enable: true
     beam: A # spectrum_header beam_id=0
@@ -53,7 +53,7 @@ subbands:
     port: 60002 # result destination UDP port
     windows:
       - center_freq: 768e6
-  # DPDK port 0, UDP 60006/60007: beam B, X/Y.
+  # DPDK port 0, UDP 60006/60007: beam B, V/H.
   - gpu_id: 1
     enable: true
     beam: B # spectrum_header beam_id=1
@@ -62,39 +62,39 @@ subbands:
     port: 60003 # result destination UDP port
     windows:
       - center_freq: 768e6
-  # DPDK port 1, UDP 60000/60001: beam A, X/Y.
+  # DPDK port 1, UDP 60000/60001: beam A, V/H.
   - gpu_id: 2
     enable: true
     beam: A # spectrum_header beam_id=0
-    start_freq: 384e6
-    end_freq: 640e6
+    start_freq: 896e6
+    end_freq: 1152e6
     port: 60004 # result destination UDP port
     windows:
-      - center_freq: 512e6
-  # DPDK port 1, UDP 60002/60003: beam B, X/Y.
+      - center_freq: 1024e6
+  # DPDK port 1, UDP 60002/60003: beam B, V/H.
   - gpu_id: 2
     enable: true
     beam: B # spectrum_header beam_id=1
-    start_freq: 384e6
-    end_freq: 640e6
+    start_freq: 896e6
+    end_freq: 1152e6
     port: 60005 # result destination UDP port
     windows:
-      - center_freq: 512e6
-  # DPDK port 1, UDP 60004/60005: beam A, X/Y.
+      - center_freq: 1024e6
+  # DPDK port 1, UDP 60004/60005: beam A, V/H.
   - gpu_id: 3
     enable: true
     beam: A # spectrum_header beam_id=0
-    start_freq: 640e6
-    end_freq: 896e6
+    start_freq: 1152e6
+    end_freq: 1408e6
     port: 60006 # result destination UDP port
     windows:
-      - center_freq: 768e6
-  # DPDK port 1, UDP 60006/60007: beam B, X/Y.
+      - center_freq: 1280e6
+  # DPDK port 1, UDP 60006/60007: beam B, V/H.
   - gpu_id: 3
     enable: true
     beam: B # spectrum_header beam_id=1
-    start_freq: 640e6
-    end_freq: 896e6
+    start_freq: 1152e6
+    end_freq: 1408e6
     port: 60007 # result destination UDP port
     windows:
-      - center_freq: 768e6
+      - center_freq: 1280e6

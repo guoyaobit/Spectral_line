@@ -1,5 +1,6 @@
 ---
-# Complete static configuration for GPU7.
+# Complete static configuration for GPU7 (server8).
+# 100G input: ETH0=10.17.16.25, ETH1=10.17.16.26.
 # Edit this file on the Ansible controller, then deploy it with
 # ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml
 Debug: false
@@ -22,43 +23,43 @@ Baseband_bits: 8
 subband_monitor: true
 subbands:
   # port is the outgoing result destination port, not the 100G input port.
-  # DPDK port 0, input UDP 60000/60001: beam A, X/Y.
+  # DPDK port 0 (ETH0, 10.17.16.25), input UDP 60000/60001: beam A, V/H.
   - gpu_id: 0
     enable: true
     beam: A
-    start_freq: 3968e6
-    end_freq: 4224e6
+    start_freq: 3456e6
+    end_freq: 3712e6
     port: 60000
     windows:
-      - center_freq: 4096e6
-  # DPDK port 0, input UDP 60002/60003: beam B, X/Y.
+      - center_freq: 3584e6
+  # DPDK port 0 (ETH0, 10.17.16.25), input UDP 60002/60003: beam B, V/H.
   - gpu_id: 0
     enable: true
     beam: B
-    start_freq: 3968e6
-    end_freq: 4224e6
+    start_freq: 3456e6
+    end_freq: 3712e6
     port: 60001
     windows:
-      - center_freq: 4096e6
-  # DPDK port 0, input UDP 60004/60005: beam A, X/Y.
+      - center_freq: 3584e6
+  # DPDK port 0 (ETH0, 10.17.16.25), input UDP 60004/60005: beam A, V/H.
   - gpu_id: 1
     enable: true
     beam: A
-    start_freq: 4224e6
-    end_freq: 4480e6
+    start_freq: 3712e6
+    end_freq: 3968e6
     port: 60002
     windows:
-      - center_freq: 4352e6
-  # DPDK port 0, input UDP 60006/60007: beam B, X/Y.
+      - center_freq: 3840e6
+  # DPDK port 0 (ETH0, 10.17.16.25), input UDP 60006/60007: beam B, V/H.
   - gpu_id: 1
     enable: true
     beam: B
-    start_freq: 4224e6
-    end_freq: 4480e6
+    start_freq: 3712e6
+    end_freq: 3968e6
     port: 60003
     windows:
-      - center_freq: 4352e6
-  # DPDK port 1, input UDP 60000/60001: beam A, X/Y.
+      - center_freq: 3840e6
+  # DPDK port 1 (ETH1, 10.17.16.26), input UDP 60000/60001: beam A, V/H.
   - gpu_id: 2
     enable: true
     beam: A
@@ -67,7 +68,7 @@ subbands:
     port: 60004
     windows:
       - center_freq: 4096e6
-  # DPDK port 1, input UDP 60002/60003: beam B, X/Y.
+  # DPDK port 1 (ETH1, 10.17.16.26), input UDP 60002/60003: beam B, V/H.
   - gpu_id: 2
     enable: true
     beam: B
@@ -76,7 +77,7 @@ subbands:
     port: 60005
     windows:
       - center_freq: 4096e6
-  # DPDK port 1, input UDP 60004/60005: beam A, X/Y.
+  # DPDK port 1 (ETH1, 10.17.16.26), input UDP 60004/60005: beam A, V/H.
   - gpu_id: 3
     enable: true
     beam: A
@@ -85,7 +86,7 @@ subbands:
     port: 60006
     windows:
       - center_freq: 4352e6
-  # DPDK port 1, input UDP 60006/60007: beam B, X/Y.
+  # DPDK port 1 (ETH1, 10.17.16.26), input UDP 60006/60007: beam B, V/H.
   - gpu_id: 3
     enable: true
     beam: B
