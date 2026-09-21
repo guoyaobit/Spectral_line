@@ -8,8 +8,8 @@ See [docs/deployment.md](docs/deployment.md) for host preparation, build,
 configuration, and start-up checks.
 
 To distribute the controller's source tree, compile it on multiple servers,
-and deploy it as enabled systemd services, use the included
-[Ansible playbook](ansible/README.md).
+enable the monitor service, and install the receiver service for coordinated
+manual startup, use the included [Ansible playbook](ansible/README.md).
 
 To inspect an 8-bit VDIF output file with DiFX tools:
 

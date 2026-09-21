@@ -3,8 +3,9 @@
 The playbook packages the source tree already present on the controller, sends
 the same archive to every server, installs the non-DPDK build dependencies,
 compiles the receiver, creates the monitor Python environment, and deploys both
-components as enabled systemd services. It does not require the target servers
-to access GitHub.
+components as systemd services. Only the monitor is enabled at boot; the
+receiver is installed disabled for coordinated manual startup. The deployment
+does not require the target servers to access GitHub.
 
 Hosts execute independently with Ansible's `free` strategy. The default five
 Ansible forks are sufficient for most clusters in this project's expected
@@ -50,6 +51,12 @@ The deployment variables are:
   `config.yaml`; it must be an integer from `0` through `7`. If omitted, the
   playbook uses the trailing digits of the inventory hostname, so hosts named
   `GPU0` through `GPU7` require no additional setting.
+- `spectral_line_gigabit_ip`: optional management-network IP shown in the
+  generated summary; it defaults to `ansible_host`.
+- `spectral_line_100g_interfaces`: per-host list of 100G receiver ports. Each
+  entry can contain `name` (or `pci`), `ip`, and `mac`. Record these values in
+  inventory because VFIO-bound ports cannot be queried reliably as Linux
+  network interfaces.
 
 The systemd units are rendered from Ansible templates, so overriding
 `spectral_line_install_dir`, `spectral_line_build_dir`, or
@@ -79,15 +86,36 @@ controller changes are included even when they have not been pushed to GitHub.
 
 If the services are already installed, the playbook stops them before replacing
 source files and rebuilding. It then creates `/opt/Spectral_line/.venv`, installs
-`monitor/requirements.txt`, renders the systemd units, and enables both services.
+`monitor/requirements.txt`, and renders the systemd units. The monitor is
+enabled and started, while the receiver remains disabled and stopped.
 
 After the build, the default executable path on every server is
-`/opt/Spectral_line/build/7mm`, and the playbook starts both services. The
-playbook does not manage GRUB, kernel command-line options, huge pages, IOMMU,
-NIC bindings, SR-IOV configuration, reboots, or `config.yaml` values. Prepare
-and validate those host settings before deployment.
+`/opt/Spectral_line/build/7mm`. `spectral-line.service` is not enabled at boot;
+start it only after the cluster's NIC, huge-page, input, and output paths have
+been validated. The playbook does not manage GRUB, kernel command-line options,
+huge pages, IOMMU, NIC bindings, SR-IOV configuration, reboots, or
+`config.yaml` values other than `ServerID`.
 
-If a receiver was intentionally stopped, start it on the cluster with:
+## Generate the cluster summary
+
+Every successful deployment writes `ansible/deployment-summary.md` on the
+controller. The Markdown table contains each server's ID, management-network
+IP, 100G receiver IP/MAC entries, live SR-IOV sender IP/MAC, and configured
+subband frequency ranges.
+
+Refresh the summary without rebuilding or restarting the receiver:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/summary.yml
+```
+
+The file is generated operational data and is excluded from Git and deployment
+source archives. If an SR-IOV address is shown as `unavailable`, verify that the
+interface named by `Sender_Nic` exists and has an IPv4 address.
+
+## Control all receivers
+
+Start the receiver on every server:
 
 ```sh
 ansible -i ansible/inventory.yml spectral_line_servers --become \
@@ -95,4 +123,29 @@ ansible -i ansible/inventory.yml spectral_line_servers --become \
   -a "name=spectral-line.service state=started"
 ```
 
-Use `state=stopped` to stop it on every server.
+Stop every receiver:
+
+```sh
+ansible -i ansible/inventory.yml spectral_line_servers --become \
+  -m systemd \
+  -a "name=spectral-line.service state=stopped"
+```
+
+Restart every receiver:
+
+```sh
+ansible -i ansible/inventory.yml spectral_line_servers --become \
+  -m systemd \
+  -a "name=spectral-line.service state=restarted"
+```
+
+Show the service state on every server:
+
+```sh
+ansible -i ansible/inventory.yml spectral_line_servers --become \
+  -m command \
+  -a "systemctl show spectral-line.service --property=ActiveState --value"
+```
+
+These commands change the current runtime state only; the receiver remains
+disabled for automatic startup after a reboot.

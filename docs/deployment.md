@@ -87,12 +87,32 @@ ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 The playbook installs the non-DPDK apt build dependencies, deploys the
 controller's local source under `/opt/Spectral_line`, produces
 `/opt/Spectral_line/build/7mm`, creates the monitor virtual environment, and
-enables and starts the receiver and monitor systemd services. On subsequent
-deployments it stops both services before the update and starts them again after
-a successful build. For each host, it sets `ServerID` in the deployed
+enables and starts the monitor systemd service. The receiver service remains
+disabled and stopped so that the cluster can be started in a coordinated way.
+On subsequent deployments it stops both services before the update, restarts
+the monitor, and leaves the receiver stopped. For each host, it sets `ServerID`
+in the deployed
 `config.yaml` from the inventory variable `spectral_line_server_id`, or from
 the trailing digits of the inventory hostname when the variable is omitted.
-The resulting ID must be between 0 and 7.
+The resulting ID must be between 0 and 7. After deployment it also generates
+`ansible/deployment-summary.md` on the controller with each receiver's
+management IP, 100G receiver addresses, live SR-IOV sender address, and
+subband frequency ranges. The 100G entries come from each host's
+`spectral_line_100g_interfaces` inventory variable because VFIO-bound ports
+cannot be discovered reliably through Linux network-interface APIs. Run
+`ansible-playbook -i ansible/inventory.yml ansible/summary.yml` to refresh the
+summary without redeploying.
+
+Start or stop the receiver on every inventory host from the controller:
+
+```sh
+ansible -i ansible/inventory.yml spectral_line_servers --become \
+  -m systemd -a "name=spectral-line.service state=started"
+ansible -i ansible/inventory.yml spectral_line_servers --become \
+  -m systemd -a "name=spectral-line.service state=stopped"
+```
+
+These commands do not enable the receiver at boot.
 
 The playbook deliberately does not install or upgrade DPDK and does not manage
 GRUB, kernel command-line options, huge pages, IOMMU, NIC bindings, or host
@@ -146,9 +166,11 @@ The supplied unit runs the receiver from `/opt/Spectral_line`, where it finds
 ```sh
 sudo install -m 0644 systemd/spectral-line.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable spectral-line.service
-sudo systemctl start spectral-line.service
+sudo systemctl disable --now spectral-line.service
 ```
+
+This installs the receiver without enabling it at boot. Start it explicitly
+only when the complete receiver cluster is ready.
 
 Control and inspect the receiver with standard systemd commands:
 

@@ -21,6 +21,7 @@
           - --exclude=build
           - --exclude=.venv
           - --exclude=ansible/inventory.yml
+          - --exclude=ansible/deployment-summary.md
           - --exclude=__pycache__
           - --exclude=*.log
           - -czf
@@ -258,11 +259,11 @@
         enabled: true
         state: started
 
-    - name: Enable and start the receiver service
+    - name: Keep the receiver service disabled and stopped
       systemd:
         name: spectral-line.service
-        enabled: true
-        state: started
+        enabled: false
+        state: stopped
 
     - name: Report deployment result
       debug:
@@ -270,7 +271,7 @@
           {{ inventory_hostname }} compiled
           {{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm;
           the monitor service is enabled and running;
-          the receiver service is enabled and running
+          the receiver service is disabled and stopped for coordinated startup
 
   handlers:
     - name: Reload systemd
@@ -286,3 +287,5 @@
       file:
         path: "{{ hostvars['localhost'].spectral_line_local_archive }}"
         state: absent
+
+- import_playbook: summary.yml

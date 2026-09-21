@@ -7,7 +7,21 @@ all:
           ansible_host: 192.0.2.11
           ansible_user: deploy
           spectral_line_server_id: 0
+          spectral_line_100g_interfaces:
+            - name: dpdk-port0
+              ip: 198.51.100.11
+              mac: 02:00:00:00:00:11
+            - name: dpdk-port1
+              ip: 198.51.100.12
+              mac: 02:00:00:00:00:12
         receiver-02:
           ansible_host: 192.0.2.12
           ansible_user: deploy
           spectral_line_server_id: 1
+          spectral_line_100g_interfaces:
+            - name: dpdk-port0
+              ip: 198.51.100.21
+              mac: 02:00:00:00:00:21
+            - name: dpdk-port1
+              ip: 198.51.100.22
+              mac: 02:00:00:00:00:22

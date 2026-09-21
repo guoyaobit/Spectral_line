@@ -1,0 +1,69 @@
+---
+- name: Collect receiver configuration and network details
+  hosts: spectral_line_servers
+  gather_facts: false
+
+  vars:
+    spectral_line_install_dir: /opt/Spectral_line
+
+  tasks:
+    - name: Read the deployed receiver configuration
+      slurp:
+        src: "{{ spectral_line_install_dir }}/config.yaml"
+      register: spectral_line_summary_config_file
+
+    - name: Parse the deployed receiver configuration
+      set_fact:
+        spectral_line_summary_config: >-
+          {{ spectral_line_summary_config_file.content | b64decode | from_yaml }}
+
+    - name: Read the SR-IOV sender interface IPv4 address
+      command:
+        argv:
+          - ip
+          - -o
+          - -4
+          - address
+          - show
+          - dev
+          - "{{ spectral_line_summary_config.Sender_Nic }}"
+      register: spectral_line_summary_sriov_ip_command
+      changed_when: false
+      failed_when: false
+
+    - name: Read the SR-IOV sender interface MAC address
+      command:
+        argv:
+          - cat
+          - "/sys/class/net/{{ spectral_line_summary_config.Sender_Nic }}/address"
+      register: spectral_line_summary_sriov_mac_command
+      changed_when: false
+      failed_when: false
+
+    - name: Record the SR-IOV sender interface addresses
+      set_fact:
+        spectral_line_summary_sriov_ip: >-
+          {{ (spectral_line_summary_sriov_ip_command.stdout |
+              regex_findall('inet\s+(\S+)') | first) |
+              default('unavailable', true) }}
+        spectral_line_summary_sriov_mac: >-
+          {{ spectral_line_summary_sriov_mac_command.stdout |
+             default('unavailable', true) }}
+
+- name: Generate the receiver cluster summary
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    spectral_line_summary_path: "{{ playbook_dir }}/deployment-summary.md"
+
+  tasks:
+    - name: Render the receiver cluster summary
+      template:
+        src: templates/deployment-summary.md.j2
+        dest: "{{ spectral_line_summary_path }}"
+        mode: "0644"
+
+    - name: Report the receiver cluster summary path
+      debug:
+        msg: "Receiver cluster summary written to {{ spectral_line_summary_path }}"
