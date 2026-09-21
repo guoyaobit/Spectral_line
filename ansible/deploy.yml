@@ -123,6 +123,14 @@
         owner: "{{ spectral_line_service_user }}"
         group: "{{ spectral_line_service_user }}"
 
+    - name: Ensure the build directory is writable by the service account
+      file:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
+        state: directory
+        owner: "{{ spectral_line_service_user }}"
+        group: "{{ spectral_line_service_user }}"
+        recurse: true
+
     - name: Verify required build commands and libraries
       become_user: "{{ spectral_line_service_user }}"
       command:
