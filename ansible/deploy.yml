@@ -36,6 +36,7 @@
         spectral_line_local_archive: "{{ spectral_line_archive.path }}"
 
 - import_playbook: disable-desktop.yml
+  when: not (spectral_line_update_only | default(false) | bool)
 
 - name: Prepare, deploy, and build the receiver cluster
   hosts: spectral_line_servers
@@ -50,6 +51,143 @@
       PATH: "/usr/local/cuda/bin:{{ ansible_env.PATH }}"
 
   tasks:
+    - name: Check the existing installation for a code update
+      stat:
+        path: "{{ spectral_line_install_dir }}"
+      register: spectral_line_existing_installation
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Require an existing installation for a code update
+      assert:
+        that:
+          - spectral_line_existing_installation.stat.exists
+          - spectral_line_existing_installation.stat.isdir
+        fail_msg: >-
+          Code-update mode requires an existing installation at
+          {{ spectral_line_install_dir }}. Run a full deployment first.
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Update source files without changing the deployed configuration
+      unarchive:
+        src: "{{ hostvars['localhost'].spectral_line_local_archive }}"
+        dest: "{{ spectral_line_install_dir }}"
+        owner: "{{ spectral_line_service_user }}"
+        group: "{{ spectral_line_service_user }}"
+        exclude:
+          - config.yaml
+          - ./config.yaml
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Ensure the existing build directory is writable for the update
+      file:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
+        state: directory
+        owner: "{{ spectral_line_service_user }}"
+        group: "{{ spectral_line_service_user }}"
+        recurse: true
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Verify build tools and libraries for the code update
+      become_user: "{{ spectral_line_service_user }}"
+      command:
+        argv: "{{ item }}"
+      environment: "{{ spectral_line_build_environment }}"
+      loop:
+        - [meson, --version]
+        - [ninja, --version]
+        - [nvcc, --version]
+        - [pkg-config, --exists, libdpdk, spdlog, fmt, yaml-cpp]
+      changed_when: false
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Check the Meson configuration for the code update
+      stat:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/build.ninja"
+      register: spectral_line_update_build_config
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Configure a new release build for the code update
+      become_user: "{{ spectral_line_service_user }}"
+      command:
+        argv:
+          - meson
+          - setup
+          - "{{ spectral_line_build_dir }}"
+          - --buildtype=release
+        chdir: "{{ spectral_line_install_dir }}"
+      environment: "{{ spectral_line_build_environment }}"
+      when:
+        - spectral_line_update_only | default(false) | bool
+        - not spectral_line_update_build_config.stat.exists
+
+    - name: Reconfigure the existing release build for the code update
+      become_user: "{{ spectral_line_service_user }}"
+      command:
+        argv:
+          - meson
+          - setup
+          - --reconfigure
+          - "{{ spectral_line_build_dir }}"
+          - --buildtype=release
+        chdir: "{{ spectral_line_install_dir }}"
+      environment: "{{ spectral_line_build_environment }}"
+      when:
+        - spectral_line_update_only | default(false) | bool
+        - spectral_line_update_build_config.stat.exists
+
+    - name: Check for the installed receiver service before compilation
+      stat:
+        path: /etc/systemd/system/spectral-line.service
+      register: spectral_line_update_service_unit
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Stop the receiver before compiling the updated executable
+      systemd:
+        name: spectral-line.service
+        state: stopped
+      when:
+        - spectral_line_update_only | default(false) | bool
+        - spectral_line_update_service_unit.stat.exists
+
+    - name: Compile the updated receiver
+      become_user: "{{ spectral_line_service_user }}"
+      command:
+        argv:
+          - meson
+          - compile
+          - -C
+          - "{{ spectral_line_build_dir }}"
+        chdir: "{{ spectral_line_install_dir }}"
+      environment: "{{ spectral_line_build_environment }}"
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Verify the updated receiver executable
+      stat:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm"
+      register: spectral_line_update_executable
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Require the updated receiver executable
+      assert:
+        that:
+          - spectral_line_update_executable.stat.exists
+          - spectral_line_update_executable.stat.isreg
+        fail_msg: The code update did not produce the 7mm executable.
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Report the compiled code update
+      debug:
+        msg: >-
+          {{ inventory_hostname }} source files updated and compiled as
+          {{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm;
+          config.yaml, virtual environment, installed service units, and the
+          monitor service were not changed; the receiver remains stopped
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Finish this host after the compiled code update
+      meta: end_host
+      when: spectral_line_update_only | default(false) | bool
+
     - name: Require a supported Debian or Ubuntu target
       assert:
         that:
@@ -292,3 +430,4 @@
         state: absent
 
 - import_playbook: summary.yml
+  when: not (spectral_line_update_only | default(false) | bool)

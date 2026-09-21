@@ -47,6 +47,8 @@ The deployment variables are:
 - `spectral_line_install_dir`: remote source directory; default
   `/opt/Spectral_line`.
 - `spectral_line_build_dir`: Meson build directory; default `build`.
+- `spectral_line_update_only`: set to `true` to update and compile code on an
+  existing deployment without repeating host provisioning; default `false`.
 - `spectral_line_server_id`: per-host `ServerID` written to the deployed
   `config.yaml`; it must be an integer from `0` through `7`. If omitted, the
   playbook uses the trailing digits of the inventory hostname, so hosts named
@@ -81,6 +83,24 @@ From the repository root on the controller, run:
 ```sh
 ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 ```
+
+### Update and compile code only
+
+To copy the controller's current source tree to every existing installation
+and compile the receiver without repeating full host provisioning, run:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10 \
+  -e spectral_line_update_only=true
+```
+
+Code-update mode requires `/opt/Spectral_line` to exist from an earlier full
+deployment. It preserves each server's deployed `config.yaml` and `.venv`,
+uses the existing build directory when available, runs Meson reconfiguration
+and compilation, and verifies `build/7mm`. It skips package installation,
+desktop changes, systemd unit installation, monitor changes, and summary
+collection. The receiver is stopped before its executable is rebuilt and is
+left stopped for coordinated startup with `service-control.sh`.
 
 The deployment switches every receiver to `multi-user.target` and stops its
 display manager, so GPU and CPU resources are not consumed by a desktop

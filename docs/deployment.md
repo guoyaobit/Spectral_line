@@ -102,6 +102,20 @@ ansible -i ansible/inventory.yml spectral_line_servers -m ping
 ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 ```
 
+To update and compile code on servers that have already been deployed, without
+repeating package installation or service provisioning, use:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10 \
+  -e spectral_line_update_only=true
+```
+
+This mode preserves the remote `config.yaml` and `.venv`, reconfigures or
+creates the Meson build, compiles and verifies `build/7mm`, and skips dependency
+installation, desktop settings, systemd unit installation, monitor changes,
+and summary generation. It stops the receiver before rebuilding and leaves it
+stopped for coordinated cluster startup.
+
 The playbook stops the graphical display manager on every receiver and changes
 the default boot target to `multi-user.target`. This leaves SSH, networking,
 and system services running while preventing desktop sessions from consuming
