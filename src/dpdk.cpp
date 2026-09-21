@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <Globalcfg.hpp>
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -566,15 +567,43 @@ generate_lcore_params(const std::vector<uint16_t> &port_ids,
   return params;
 }
 
-// Map every CPU allowed by the current process affinity to a unique DPDK
-// lcore, up to the DPDK build's RTE_MAX_LCORE limit.
+// CUDA and other runtime libraries may narrow the calling thread's CPU
+// affinity during initialization. Ask the kernel to restore every online CPU
+// that the service's cpuset permits, then map the effective set to DPDK
+// lcores. sched_setaffinity() automatically intersects the requested mask
+// with any cgroup/cpuset restrictions.
 static std::string build_eal_lcore_mapping() {
+  const long online_cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+  if (online_cpu_count <= 0) {
+    cfg.logger_->critical("Cannot determine the number of online CPUs");
+    std::exit(EXIT_FAILURE);
+  }
+
+  cpu_set_t requested_affinity;
+  CPU_ZERO(&requested_affinity);
+  const int requested_cpu_count =
+      std::min<long>(online_cpu_count, CPU_SETSIZE);
+  for (int cpu = 0; cpu < requested_cpu_count; ++cpu)
+    CPU_SET(cpu, &requested_affinity);
+
+  if (sched_setaffinity(0, sizeof(requested_affinity),
+                        &requested_affinity) != 0) {
+    cfg.logger_->warn("Cannot expand DPDK thread CPU affinity: {}",
+                      std::strerror(errno));
+  }
+
   cpu_set_t affinity;
   CPU_ZERO(&affinity);
   if (sched_getaffinity(0, sizeof(affinity), &affinity) != 0) {
     cfg.logger_->critical("Cannot read process CPU affinity: {}",
                           std::strerror(errno));
     std::exit(EXIT_FAILURE);
+  }
+
+  int allowed_cpu_count = 0;
+  for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+    if (CPU_ISSET(cpu, &affinity))
+      ++allowed_cpu_count;
   }
 
   std::ostringstream mapping;
@@ -595,8 +624,10 @@ static std::string build_eal_lcore_mapping() {
     std::exit(EXIT_FAILURE);
   }
 
-  cfg.logger_->info("Enabling {} DPDK lcores from process CPU affinity",
-                    logical_lcore);
+  cfg.logger_->info(
+      "CPU availability: {} online, {} allowed by affinity, DPDK maximum {}",
+      online_cpu_count, allowed_cpu_count, RTE_MAX_LCORE);
+  cfg.logger_->info("Enabling {} DPDK lcores", logical_lcore);
   cfg.logger_->debug("DPDK EAL lcore mapping: {}", mapping.str());
   return mapping.str();
 }
@@ -615,14 +646,26 @@ int dpdk() {
   if (ret < 0)
     rte_exit(EXIT_FAILURE, "Error with EAL init\n");
 
-  struct rte_mempool *mbuf_pool = rte_pktmbuf_pool_create(
-      "MBUF_POOL", NUM_MBUFS * 2, MBUF_CACHE_SIZE, 0, 10240, rte_socket_id());
-  if (mbuf_pool == NULL)
-    rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
   auto &cfg = GlobalConfig::getInstance();
   uint16_t queues_per_port = 8;
   uint16_t start_dest_port = 60000;
   std::vector<uint16_t> ports = {0, 1};
+
+  // Validate worker availability before starting ports so an affinity or
+  // DPDK build limit cannot leave initialized Ethernet devices behind.
+  std::vector<lcore_param> lcore_params;
+  try {
+    lcore_params =
+        generate_lcore_params(ports, queues_per_port, start_dest_port);
+  } catch (const std::exception &e) {
+    cfg.logger_->critical("Cannot assign DPDK workers: {}", e.what());
+    rte_exit(EXIT_FAILURE, "Cannot assign DPDK workers: %s\n", e.what());
+  }
+
+  struct rte_mempool *mbuf_pool = rte_pktmbuf_pool_create(
+      "MBUF_POOL", NUM_MBUFS * 2, MBUF_CACHE_SIZE, 0, 10240, rte_socket_id());
+  if (mbuf_pool == NULL)
+    rte_exit(EXIT_FAILURE, "Cannot create mbuf pool\n");
   // Initialize both physical receive ports.
   if (port_init(0, mbuf_pool, queues_per_port) != 0)
     rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", 0);
@@ -632,14 +675,6 @@ int dpdk() {
   cfg.logger_->info("DPDK enabled lcores: {}, main lcore: {}",
                     rte_lcore_count(), rte_get_main_lcore());
 
-  std::vector<lcore_param> lcore_params;
-  try {
-    lcore_params =
-        generate_lcore_params(ports, queues_per_port, start_dest_port);
-  } catch (const std::exception &e) {
-    cfg.logger_->critical("Cannot assign DPDK workers: {}", e.what());
-    rte_exit(EXIT_FAILURE, "Cannot assign DPDK workers: %s\n", e.what());
-  }
   for (size_t i = 0; i < lcore_params.size(); ++i) {
     const size_t subband_index = i / 2; // Two queues per subband
     int launch_result = 0;
