@@ -188,6 +188,13 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   the actual center frequency of channel 0 in `start_freq_hz`; consumers derive
   the exclusive cutoff as `start_freq_hz + n_channels * channel_bw_hz` and the
   final channel center as `start_freq_hz + (n_channels - 1) * channel_bw_hz`.
+- `subbands[].beam`: beam label `A` or `B`. Each subband can select its beam
+  independently. For compatibility with an older deployed `config.yaml`, a
+  missing value defaults to A for subbands 0–3 and B for subbands 4–7 with a
+  startup warning. Spectrum protocol version 2 writes this value to
+  `spectrum_header.beam_id`, where `0` means beam A and `1` means beam B. The
+  field reuses one byte of the former two-byte reserved area, so the packed
+  header remains 95 bytes and offsets of all preceding fields remain unchanged.
 - `Storage_node_ip` and `Storage_node_mac`: address of the result receiver.
 - `Sender_Nic`: name of the kernel-managed SR-IOV VF used to reach the result
   receiver; the example configuration uses `ens81f0v0`. The current code uses

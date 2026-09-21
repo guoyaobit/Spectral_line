@@ -59,15 +59,15 @@ address is read separately from the deployed `config.yaml`.
 `Destination UDP port` is the configured result destination on
 `Storage_node_ip`; it is not the fixed 100G input port.
 
-| Server | Subband | Enabled | Start frequency (MHz) | End frequency (MHz) | Destination UDP port |
-|---|---:|:---:|---:|---:|---:|
+| Server | Subband | Beam | Enabled | Start frequency (MHz) | End frequency (MHz) | Destination UDP port |
+|---|---:|:---:|:---:|---:|---:|---:|
 {% for host in groups['spectral_line_servers'] | default([]) -%}
 {% set host_data = hostvars[host] -%}
 {% set config = host_data.spectral_line_summary_config | default({}) -%}
 {% for subband in config.get('subbands', []) -%}
-| {{ host }} | {{ loop.index0 }} | {{ 'yes' if subband.get('enable', true) else 'no' }} | {{ ((subband.get('start_freq', 0) | float) / 1000000) | round(3) }} | {{ ((subband.get('end_freq', 0) | float) / 1000000) | round(3) }} | {{ subband.get('port', 'unavailable') }} |
+| {{ host }} | {{ loop.index0 }} | {{ subband.get('beam', 'A' if loop.index0 < 4 else 'B') }} | {{ 'yes' if subband.get('enable', true) else 'no' }} | {{ ((subband.get('start_freq', 0) | float) / 1000000) | round(3) }} | {{ ((subband.get('end_freq', 0) | float) / 1000000) | round(3) }} | {{ subband.get('port', 'unavailable') }} |
 {% else -%}
-| {{ host }} | unavailable | — | — | — | — |
+| {{ host }} | unavailable | — | — | — | — | — |
 {% endfor -%}
 {% endfor %}
 

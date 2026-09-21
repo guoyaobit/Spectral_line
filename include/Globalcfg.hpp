@@ -23,6 +23,10 @@ enum class ObservationMode : uint8_t {
   SPECTRAL = 1, // Spectral-line observation
   CONTINUUM = 2 // Continuum observation
 };
+enum class BeamId : uint8_t {
+  A = 0,
+  B = 1,
+};
 struct Packet {
   uint8_t payload[8192]; // 4096*(Re + Im)
 };
@@ -55,6 +59,7 @@ struct WindowConfig {
 struct SubbandConfig {
   u_int8_t subband_id;
   bool enable = true;
+  BeamId beam = BeamId::A;
   int gpu_id;
   double start_freq;
   double end_freq;
@@ -305,6 +310,25 @@ public:
         SubbandConfig *sb = new SubbandConfig();
         sb->subband_id = subband_id++;
         sb->enable = sbNode["enable"].as<bool>();
+        std::string beam_name;
+        if (!sbNode["beam"]) {
+          sb->beam = sb->subband_id < 4 ? BeamId::A : BeamId::B;
+          beam_name = sb->beam == BeamId::A ? "A" : "B";
+          logger_->warn(
+              "subband {} has no beam setting; defaulting to beam {}",
+              sb->subband_id, beam_name);
+        } else if (!sbNode["beam"].IsScalar()) {
+          throw std::runtime_error("Subband beam must be a scalar A or B");
+        } else {
+          beam_name = sbNode["beam"].as<std::string>();
+          if (beam_name == "A") {
+            sb->beam = BeamId::A;
+          } else if (beam_name == "B") {
+            sb->beam = BeamId::B;
+          } else {
+            throw std::runtime_error("Subband beam must be A or B");
+          }
+        }
         if (!sb->enable) {
           subbands.push_back(sb);
           continue;
@@ -370,16 +394,17 @@ public:
           w->header.channel_bw_hz = channel_bw_hz;
           w->header.subband_start_freq = sb->start_freq;
           w->header.subband_end_freq = sb->end_freq;
+          w->header.beam_id = static_cast<uint8_t>(sb->beam);
           // Each server supports at most eight subbands.
           w->header.subband_id = ServerID * 8 + sb->subband_id;
           w->header.start_freq_hz = w->start_freq;
           w->header.n_channels = win_channels;
           w->header.window_id = win_id++;
           logger_->info(
-              "subband {} window {}: requested center {:.9f} MHz, "
+              "subband {} beam {} window {}: requested center {:.9f} MHz, "
               "output [{:.9f}, {:.9f}) MHz, channel width {:.9f} Hz, "
               "destination {}:{}",
-              sb->subband_id, w->header.window_id,
+              sb->subband_id, beam_name, w->header.window_id,
               w->center_freq / 1e6, w->start_freq / 1e6,
               w->end_freq / 1e6, channel_bw_hz, Storage_node_ip, w->port);
           sb->windows.push_back(w);
