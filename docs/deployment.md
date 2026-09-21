@@ -166,6 +166,14 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
 - `integration_t`, `win_bw`, and `win_channels`: determine FFT length and
   integration. The computed FFT length must be a multiple of 4096 and at least
   65536.
+- `subbands[].windows[].center_freq`: requested center frequency for each
+  spectral window. All windows use the global `win_bw` and `win_channels`.
+  Frequencies are calculated in double precision and the requested window is
+  aligned to the nearest FFT channel. At startup, the receiver logs the actual
+  output interval as `[start, end)` for every window. The spectrum header stores
+  the actual center frequency of channel 0 in `start_freq_hz`; consumers derive
+  the exclusive cutoff as `start_freq_hz + n_channels * channel_bw_hz` and the
+  final channel center as `start_freq_hz + (n_channels - 1) * channel_bw_hz`.
 - `Storage_node_ip` and `Storage_node_mac`: address of the result receiver.
 - `Sender_Nic`: name of the kernel-managed SR-IOV VF used to reach the result
   receiver; the example configuration uses `ens81f0v0`. The current code uses

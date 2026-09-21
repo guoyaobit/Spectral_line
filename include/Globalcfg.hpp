@@ -42,10 +42,12 @@ struct StokesResult {
   std::vector<float> data; // One float4 (I, Q, U, V) per frequency bin
 };
 struct WindowConfig {
-  float start_freq;
+  // Actual FFT-bin-aligned frequency range. end_freq is exclusive.
+  double start_freq;
+  double end_freq;
   size_t start_idx;
-  float center_freq;
-  float BW;
+  double center_freq;
+  double BW;
   SpectrumSender sender;
   spectrum_header header;
   int port;
@@ -54,9 +56,9 @@ struct SubbandConfig {
   u_int8_t subband_id;
   bool enable = true;
   int gpu_id;
-  float start_freq;
-  float end_freq;
-  static constexpr float BW = 256e6f;
+  double start_freq;
+  double end_freq;
+  static constexpr double BW = 256e6;
   int port;
   std::vector<WindowConfig *> windows;
 };
@@ -119,7 +121,7 @@ public:
   const int packet_size = 8192; // Payload bytes per packet
   int total_nfft = 65536;       // must be multipied by 4096
   const int Max_nfft = 65536 * 256;
-  float win_bw = 256e6;
+  double win_bw = 256e6;
   int win_channels = 4096;
   double integration_t = 1;
   ObservationMode observation_mode = ObservationMode::SPECTRAL;
@@ -250,13 +252,21 @@ public:
       if (config["subband_monitor"])
         subband_monitor = config["subband_monitor"].as<bool>();
       if (config["win_bw"])
-          win_bw = config["win_bw"].as<float>();
-        if (!std::isfinite(win_bw) || win_bw <= 0.0f)
-          throw std::runtime_error("win_bw must be finite and > 0");
+        win_bw = config["win_bw"].as<double>();
+      if (!std::isfinite(win_bw) || win_bw <= 0.0)
+        throw std::runtime_error("win_bw must be finite and > 0");
       if (config["win_channels"])
         win_channels = config["win_channels"].as<int>();
+      if (win_channels <= 0)
+        throw std::runtime_error("win_channels must be > 0");
       // Derive the FFT length from the requested window.
-      total_nfft = sampling_rate / win_bw * win_channels;
+      const double requested_nfft =
+          static_cast<double>(sampling_rate) / win_bw * win_channels;
+      if (!std::isfinite(requested_nfft) || requested_nfft < 1.0 ||
+          requested_nfft > static_cast<double>(Max_nfft)) {
+        throw std::runtime_error("Calculated FFT length is out of range");
+      }
+      total_nfft = static_cast<int>(std::llround(requested_nfft));
 
       if (config["integration_t"])
         integration_t = config["integration_t"].as<double>();
@@ -300,9 +310,20 @@ public:
           continue;
         }
         sb->gpu_id = sbNode["gpu_id"].as<int>();
-        sb->start_freq = sbNode["start_freq"].as<float>();
-        sb->end_freq = sbNode["end_freq"].as<float>();
+        sb->start_freq = sbNode["start_freq"].as<double>();
+        sb->end_freq = sbNode["end_freq"].as<double>();
         sb->port = sbNode["port"].as<int>();
+
+        if (!std::isfinite(sb->start_freq) ||
+            !std::isfinite(sb->end_freq) ||
+            sb->end_freq <= sb->start_freq) {
+          throw std::runtime_error("Invalid subband frequency range");
+        }
+        const double subband_bw = sb->end_freq - sb->start_freq;
+        if (std::abs(subband_bw - sampling_rate) > 0.5) {
+          throw std::runtime_error(
+              "Subband bandwidth must equal the 256 MHz sampling rate");
+        }
 
         if (!sbNode["windows"]) {
           throw std::runtime_error("Configuration is missing windows");
@@ -311,33 +332,56 @@ public:
         for (const auto &winNode : sbNode["windows"]) {
           WindowConfig *w = new WindowConfig();
           w->port = sb->port;
-          w->center_freq = winNode["center_freq"].as<float>();
+          w->center_freq = winNode["center_freq"].as<double>();
+          if (!std::isfinite(w->center_freq))
+            throw std::runtime_error("Window center frequency must be finite");
 
-          w->BW = win_bw;
-          w->start_freq = w->center_freq - win_bw / 2;
+          const double requested_start_freq =
+              w->center_freq - win_bw / 2.0;
+          const double requested_end_freq =
+              w->center_freq + win_bw / 2.0;
 
-          if (w->start_freq < sb->start_freq) {
+          if (requested_start_freq < sb->start_freq) {
             throw std::runtime_error("Window start fre < subband start fre!");
           }
-          const float end_freq = w->center_freq + win_bw / 2;
-          if (end_freq > sb->end_freq) {
+          if (requested_end_freq > sb->end_freq) {
             throw std::runtime_error("Window end freq > subband end freq!");
           }
 
-          w->start_idx =
-              round(w->start_freq - sb->start_freq) / sb->BW * total_nfft;
+          const double channel_bw_hz =
+              static_cast<double>(sampling_rate) / total_nfft;
+          const long long start_idx = std::llround(
+              (requested_start_freq - sb->start_freq) / channel_bw_hz);
+          if (start_idx < 0 ||
+              static_cast<unsigned long long>(start_idx) +
+                      static_cast<unsigned long long>(win_channels) >
+                  static_cast<unsigned long long>(total_nfft)) {
+            throw std::runtime_error(
+                "FFT-bin-aligned window exceeds subband bounds");
+          }
+
+          w->start_idx = static_cast<size_t>(start_idx);
+          w->start_freq =
+              sb->start_freq + w->start_idx * channel_bw_hz;
+          w->BW = win_channels * channel_bw_hz;
+          w->end_freq = w->start_freq + w->BW;
           w->sender.init(Storage_node_ip, w->port);
           w->header.exposure = integration_time();
-          w->header.channel_bw_hz = (float)sampling_rate / total_nfft;
+          w->header.channel_bw_hz = channel_bw_hz;
           w->header.subband_start_freq = sb->start_freq;
           w->header.subband_end_freq = sb->end_freq;
           // Each server supports at most eight subbands.
           w->header.subband_id = ServerID * 8 + sb->subband_id;
-          w->header.start_freq_hz =
-              sb->start_freq + w->start_idx * sampling_rate / total_nfft;
+          w->header.start_freq_hz = w->start_freq;
           w->header.n_channels = win_channels;
           w->header.window_id = win_id++;
-          logger_->info("dest ip {},port {}", Storage_node_ip, w->port);
+          logger_->info(
+              "subband {} window {}: requested center {:.9f} MHz, "
+              "output [{:.9f}, {:.9f}) MHz, channel width {:.9f} Hz, "
+              "destination {}:{}",
+              sb->subband_id, w->header.window_id,
+              w->center_freq / 1e6, w->start_freq / 1e6,
+              w->end_freq / 1e6, channel_bw_hz, Storage_node_ip, w->port);
           sb->windows.push_back(w);
         }
 
