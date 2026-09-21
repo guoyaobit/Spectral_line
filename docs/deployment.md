@@ -89,7 +89,10 @@ controller's local source under `/opt/Spectral_line`, produces
 `/opt/Spectral_line/build/7mm`, creates the monitor virtual environment, and
 enables and starts the receiver and monitor systemd services. On subsequent
 deployments it stops both services before the update and starts them again after
-a successful build.
+a successful build. For each host, it sets `ServerID` in the deployed
+`config.yaml` from the inventory variable `spectral_line_server_id`, or from
+the trailing digits of the inventory hostname when the variable is omitted.
+The resulting ID must be between 0 and 7.
 
 The playbook deliberately does not install or upgrade DPDK and does not manage
 GRUB, kernel command-line options, huge pages, IOMMU, NIC bindings, or host

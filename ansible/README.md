@@ -46,6 +46,10 @@ The deployment variables are:
 - `spectral_line_install_dir`: remote source directory; default
   `/opt/Spectral_line`.
 - `spectral_line_build_dir`: Meson build directory; default `build`.
+- `spectral_line_server_id`: per-host `ServerID` written to the deployed
+  `config.yaml`; it must be an integer from `0` through `7`. If omitted, the
+  playbook uses the trailing digits of the inventory hostname, so hosts named
+  `GPU0` through `GPU7` require no additional setting.
 
 The systemd units are rendered from Ansible templates, so overriding
 `spectral_line_install_dir`, `spectral_line_build_dir`, or

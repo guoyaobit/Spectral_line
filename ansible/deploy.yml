@@ -123,6 +123,31 @@
         owner: "{{ spectral_line_service_user }}"
         group: "{{ spectral_line_service_user }}"
 
+    - name: Resolve the server ID for this host
+      set_fact:
+        spectral_line_effective_server_id: >-
+          {{ spectral_line_server_id | default(
+             inventory_hostname | regex_search('[0-9]+$')) }}
+
+    - name: Require a server ID between zero and seven
+      assert:
+        that:
+          - spectral_line_effective_server_id | string is match('^[0-9]+$')
+          - spectral_line_effective_server_id | int >= 0
+          - spectral_line_effective_server_id | int <= 7
+        fail_msg: >-
+          Set spectral_line_server_id to an integer from 0 through 7 for
+          {{ inventory_hostname }}, or end its inventory hostname with that ID.
+
+    - name: Set the server ID in the deployed configuration
+      lineinfile:
+        path: "{{ spectral_line_install_dir }}/config.yaml"
+        regexp: '^ServerID\s*:'
+        line: "ServerID: {{ spectral_line_effective_server_id | int }}"
+        owner: "{{ spectral_line_service_user }}"
+        group: "{{ spectral_line_service_user }}"
+        mode: "0644"
+
     - name: Ensure the build directory is writable by the service account
       file:
         path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"

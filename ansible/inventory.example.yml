@@ -6,6 +6,8 @@ all:
         receiver-01:
           ansible_host: 192.0.2.11
           ansible_user: deploy
+          spectral_line_server_id: 0
         receiver-02:
           ansible_host: 192.0.2.12
           ansible_user: deploy
+          spectral_line_server_id: 1
