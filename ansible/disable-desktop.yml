@@ -1,0 +1,35 @@
+---
+- name: Disable the desktop environment on receiver servers
+  hosts: spectral_line_servers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read the default systemd target
+      command: systemctl get-default
+      register: spectral_line_default_target
+      changed_when: false
+
+    - name: Boot into command-line mode by default
+      command: systemctl set-default multi-user.target
+      when: spectral_line_default_target.stdout | trim != "multi-user.target"
+
+    - name: Check for a display manager service
+      command:
+        argv:
+          - systemctl
+          - show
+          - display-manager.service
+          - --property=LoadState
+          - --value
+      register: spectral_line_display_manager
+      changed_when: false
+      failed_when: false
+
+    - name: Stop the desktop display manager
+      systemd:
+        name: display-manager.service
+        state: stopped
+      when:
+        - spectral_line_display_manager.rc == 0
+        - spectral_line_display_manager.stdout | trim != "not-found"

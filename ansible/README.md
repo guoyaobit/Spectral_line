@@ -82,6 +82,18 @@ From the repository root on the controller, run:
 ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 ```
 
+The deployment switches every receiver to `multi-user.target` and stops its
+display manager, so GPU and CPU resources are not consumed by a desktop
+session. SSH, networking, and background services remain available. Apply only
+this host setting without rebuilding the receiver by running:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/disable-desktop.yml
+```
+
+To restore graphical startup later, set `graphical.target` as the default and
+start `display-manager.service` on the affected hosts.
+
 The controller creates a temporary archive of its current working tree. It
 excludes `.git`, `build`, `.venv`, log files, Python caches, and the private inventory.
 The archive is expanded into `/opt/Spectral_line` on each target, so local

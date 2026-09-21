@@ -35,6 +35,8 @@
       set_fact:
         spectral_line_local_archive: "{{ spectral_line_archive.path }}"
 
+- import_playbook: disable-desktop.yml
+
 - name: Prepare, deploy, and build the receiver cluster
   hosts: spectral_line_servers
   become: true

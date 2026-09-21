@@ -84,6 +84,18 @@ ansible -i ansible/inventory.yml spectral_line_servers -m ping
 ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10
 ```
 
+The playbook stops the graphical display manager on every receiver and changes
+the default boot target to `multi-user.target`. This leaves SSH, networking,
+and system services running while preventing desktop sessions from consuming
+receiver resources. Run the same operation without a rebuild with:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/disable-desktop.yml
+```
+
+To restore desktop startup on a host, run `systemctl set-default
+graphical.target` followed by `systemctl start display-manager.service`.
+
 The playbook installs the non-DPDK apt build dependencies, deploys the
 controller's local source under `/opt/Spectral_line`, produces
 `/opt/Spectral_line/build/7mm`, creates the monitor virtual environment, and
