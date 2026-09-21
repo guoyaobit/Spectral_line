@@ -2,7 +2,7 @@
 Description=Spectral line DPDK/CUDA receiver
 Wants=network-online.target
 After=network-online.target local-fs.target
-ConditionPathIsExecutable={{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm
+ConditionFileIsExecutable={{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm
 ConditionPathExists={{ spectral_line_install_dir }}/config.yaml
 
 [Service]

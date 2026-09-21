@@ -2,7 +2,7 @@
 Description=Spectral line DPDK/CUDA receiver
 Wants=network-online.target
 After=network-online.target local-fs.target
-ConditionPathIsExecutable=/opt/Spectral_line/build/7mm
+ConditionFileIsExecutable=/opt/Spectral_line/build/7mm
 ConditionPathExists=/opt/Spectral_line/config.yaml
 
 [Service]
