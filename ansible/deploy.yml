@@ -63,6 +63,7 @@
         name:
           - build-essential
           - git
+          - ipmitool
           - libelf-dev
           - libfmt-dev
           - libnuma-dev

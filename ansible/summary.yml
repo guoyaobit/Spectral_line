@@ -6,6 +6,9 @@
   vars:
     spectral_line_install_dir: /opt/Spectral_line
 
+  environment:
+    PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
   tasks:
     - name: Read the deployed receiver configuration
       slurp:
@@ -16,6 +19,92 @@
       set_fact:
         spectral_line_summary_config: >-
           {{ spectral_line_summary_config_file.content | b64decode | from_yaml }}
+
+    - name: Read the local BMC LAN configuration
+      become: true
+      command:
+        argv:
+          - ipmitool
+          - lan
+          - print
+          - "{{ spectral_line_bmc_channel | default(1) }}"
+      register: spectral_line_summary_bmc_command
+      changed_when: false
+      failed_when: false
+
+    - name: Record the local BMC IP address
+      set_fact:
+        spectral_line_summary_bmc_ip: >-
+          {{ (spectral_line_summary_bmc_command.stdout |
+              regex_findall('(?m)^\s*IP Address\s*:\s*(\S+)') | first) |
+              default('unavailable', true) }}
+
+    - name: Map Mellanox devices to Linux network interfaces
+      command: ibdev2netdev
+      register: spectral_line_summary_ibdev2netdev
+      changed_when: false
+      failed_when: false
+
+    - name: Select the 100G receiver interfaces
+      set_fact:
+        spectral_line_summary_100g_mappings: >-
+          {{ spectral_line_summary_ibdev2netdev.stdout |
+             regex_findall('(?m)^(mlx5_[01])\s+port\s+\d+\s+==>\s+(\S+)') }}
+
+    - name: Read the 100G receiver interface IPv4 addresses
+      command:
+        argv:
+          - ip
+          - -o
+          - -4
+          - address
+          - show
+          - dev
+          - "{{ item.1 }}"
+      loop: "{{ spectral_line_summary_100g_mappings }}"
+      loop_control:
+        label: "{{ item.0 }} => {{ item.1 }}"
+      register: spectral_line_summary_100g_ip_commands
+      changed_when: false
+      failed_when: false
+
+    - name: Read the 100G receiver interface MAC addresses
+      command:
+        argv:
+          - cat
+          - "/sys/class/net/{{ item.1 }}/address"
+      loop: "{{ spectral_line_summary_100g_mappings }}"
+      loop_control:
+        label: "{{ item.0 }} => {{ item.1 }}"
+      register: spectral_line_summary_100g_mac_commands
+      changed_when: false
+      failed_when: false
+
+    - name: Record the detected 100G receiver interface addresses
+      set_fact:
+        spectral_line_summary_detected_100g_interfaces: >-
+          {{ (spectral_line_summary_detected_100g_interfaces | default([])) +
+             [{'name': item.0,
+               'netdev': item.1,
+               'ip': ((spectral_line_summary_100g_ip_commands.results[
+                        mapping_index].stdout |
+                        regex_findall('inet\s+(\S+)') | first) |
+                        default('unavailable', true)),
+               'mac': (spectral_line_summary_100g_mac_commands.results[
+                         mapping_index].stdout |
+                         default('unavailable', true))}] }}
+      loop: "{{ spectral_line_summary_100g_mappings }}"
+      loop_control:
+        index_var: mapping_index
+        label: "{{ item.0 }} => {{ item.1 }}"
+
+    - name: Select detected or inventory 100G interface details
+      set_fact:
+        spectral_line_summary_100g_interfaces: >-
+          {{ spectral_line_summary_detected_100g_interfaces
+             if (spectral_line_summary_detected_100g_interfaces |
+                 default([]) | length > 0)
+             else (spectral_line_100g_interfaces | default([])) }}
 
     - name: Read the SR-IOV sender interface IPv4 address
       command:

@@ -53,10 +53,13 @@ The deployment variables are:
   `GPU0` through `GPU7` require no additional setting.
 - `spectral_line_gigabit_ip`: optional management-network IP shown in the
   generated summary; it defaults to `ansible_host`.
-- `spectral_line_100g_interfaces`: per-host list of 100G receiver ports. Each
-  entry can contain `name` (or `pci`), `ip`, and `mac`. Record these values in
-  inventory because VFIO-bound ports cannot be queried reliably as Linux
-  network interfaces.
+- `spectral_line_bmc_channel`: optional IPMI LAN channel used to discover the
+  local BMC IP; it defaults to channel `1`.
+- `spectral_line_100g_interfaces`: optional fallback list of 100G receiver
+  ports. Each entry can contain `name` (or `pci`), `ip`, and `mac`. Normally the
+  summary maps `mlx5_0` and `mlx5_1` to Linux interfaces with `ibdev2netdev`
+  and reads their addresses automatically. Inventory values are used only when
+  that discovery produces no interfaces.
 
 The systemd units are rendered from Ansible templates, so overriding
 `spectral_line_install_dir`, `spectral_line_build_dir`, or
@@ -100,8 +103,8 @@ huge pages, IOMMU, NIC bindings, SR-IOV configuration, reboots, or
 
 Every successful deployment writes `ansible/deployment-summary.md` on the
 controller. The Markdown table contains each server's ID, management-network
-IP, 100G receiver IP/MAC entries, live SR-IOV sender IP/MAC, and configured
-subband frequency ranges.
+IP, local BMC IP, 100G receiver IP/MAC entries, live SR-IOV sender IP/MAC, and
+configured subband frequency ranges.
 
 Refresh the summary without rebuilding or restarting the receiver:
 
@@ -111,7 +114,12 @@ ansible-playbook -i ansible/inventory.yml ansible/summary.yml
 
 The file is generated operational data and is excluded from Git and deployment
 source archives. If an SR-IOV address is shown as `unavailable`, verify that the
-interface named by `Sender_Nic` exists and has an IPv4 address.
+interface named by `Sender_Nic` exists and has an IPv4 address. If the 100G
+interfaces are not detected, verify `ibdev2netdev` is installed and reports
+both `mlx5_0` and `mlx5_1`, or provide the inventory fallback values. A BMC
+value of `unavailable` means `ipmitool lan print` failed; verify IPMI device
+access and set `spectral_line_bmc_channel` if the LAN interface is not channel
+1.
 
 ## Control all receivers
 

@@ -96,10 +96,13 @@ in the deployed
 the trailing digits of the inventory hostname when the variable is omitted.
 The resulting ID must be between 0 and 7. After deployment it also generates
 `ansible/deployment-summary.md` on the controller with each receiver's
-management IP, 100G receiver addresses, live SR-IOV sender address, and
-subband frequency ranges. The 100G entries come from each host's
-`spectral_line_100g_interfaces` inventory variable because VFIO-bound ports
-cannot be discovered reliably through Linux network-interface APIs. Run
+management IP, local BMC IP, 100G receiver addresses, live SR-IOV sender
+address, and subband frequency ranges. The BMC IP is read with
+`ipmitool lan print` (channel 1 by default, configurable with
+`spectral_line_bmc_channel`). The 100G entries are discovered by mapping `mlx5_0`
+and `mlx5_1` to Linux interfaces with `ibdev2netdev`, then reading each
+interface's IPv4 and MAC address. A per-host `spectral_line_100g_interfaces`
+inventory list can supply fallback values when discovery is unavailable. Run
 `ansible-playbook -i ansible/inventory.yml ansible/summary.yml` to refresh the
 summary without redeploying.
 
