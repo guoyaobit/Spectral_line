@@ -4,3 +4,4 @@
 build/
 ansible/inventory.yml
 ansible/deployment-summary.md
+Spectral_Line_Recorder/

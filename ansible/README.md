@@ -49,10 +49,10 @@ The deployment variables are:
 - `spectral_line_build_dir`: Meson build directory; default `build`.
 - `spectral_line_update_only`: set to `true` to update and compile code on an
   existing deployment without repeating host provisioning; default `false`.
-- `spectral_line_server_id`: per-host `ServerID` written to the deployed
-  `config.yaml`; it must be an integer from `0` through `7`. If omitted, the
-  playbook uses the trailing digits of the inventory hostname, so hosts named
-  `GPU0` through `GPU7` require no additional setting.
+- `spectral_line_server_id`: per-host ID used to select the complete static file
+  `ansible/configs/GPU<ID>.yaml`; it must be an integer from `0` through `7`.
+  If omitted, the playbook uses the trailing digits of the inventory hostname,
+  so hosts named `GPU0` through `GPU7` require no additional setting.
 - `spectral_line_gigabit_ip`: optional management-network IP shown in the
   generated summary; it defaults to `ansible_host`.
 - `spectral_line_bmc_channel`: optional IPMI LAN channel used to discover the
@@ -128,8 +128,59 @@ After the build, the default executable path on every server is
 `/opt/Spectral_line/build/7mm`. `spectral-line.service` is not enabled at boot;
 start it only after the cluster's NIC, huge-page, input, and output paths have
 been validated. The playbook does not manage GRUB, kernel command-line options,
-huge pages, IOMMU, NIC bindings, SR-IOV configuration, reboots, or
-`config.yaml` values other than `ServerID`.
+huge pages, IOMMU, NIC bindings, SR-IOV configuration, or reboots. It selects
+one complete static `config.yaml` from `ansible/configs` for each server.
+
+## Deploy static server configurations
+
+The controller contains eight complete, directly editable configuration files:
+`ansible/configs/GPU0.yaml` through `ansible/configs/GPU7.yaml`. Ansible
+does not calculate or merge frequency values during deployment; it validates
+and copies the file matching each host's `spectral_line_server_id`.
+
+| Static file | ServerID | First range (MHz) | Second range (MHz) |
+|---|---:|---:|---:|
+| `GPU0.yaml` | 0 | 384–640 | 640–896 |
+| `GPU1.yaml` | 1 | 896–1152 | 1152–1408 |
+| `GPU2.yaml` | 2 | 1408–1664 | 1664–1920 |
+| `GPU3.yaml` | 3 | 1920–2176 | 2176–2432 |
+| `GPU4.yaml` | 4 | 2432–2688 | 2688–2944 |
+| `GPU5.yaml` | 5 | 2944–3200 | 3200–3456 |
+| `GPU6.yaml` | 6 | 3456–3712 | 3712–3968 |
+| `GPU7.yaml` | 7 | 3968–4224 | 4224–4480 |
+
+Each static file defines four 256 MHz subbands per 100G interface in this
+order:
+
+| Input UDP pair | Beam | Polarisation | Frequency selection |
+|---|:---:|:---:|---|
+| 60000/60001 | A | X/Y | first start frequency |
+| 60002/60003 | B | X/Y | first start frequency |
+| 60004/60005 | A | X/Y | second start frequency |
+| 60006/60007 | B | X/Y | second start frequency |
+
+Both 100G interfaces therefore produce eight `subbands` entries per server.
+The configured `subbands[].port` values remain outgoing result ports
+`60000–60007`; they are not the fixed input UDP pairs in the table above.
+
+To copy only the static `config.yaml` files without rebuilding the
+application, run:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml \
+  --forks 10
+```
+
+Preview all eight file replacements before writing them:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml \
+  --forks 10 --check --diff
+```
+
+Each selected file replaces the entire remote `config.yaml`. Therefore,
+server-specific destination IPs, MACs, sender interfaces, and any other
+settings must be edited in that server's static file before deployment.
 
 ## Generate the cluster summary
 
@@ -156,12 +207,13 @@ access and set `spectral_line_bmc_channel` if the LAN interface is not channel
 1.
 
 Both 100G DPDK ports receive UDP destination ports `60000–60007`. On each
-interface, `60000/60001` are the X/Y streams of one subband,
-`60002/60003` are the next, followed by `60004/60005` and `60006/60007`.
-DPDK port 0 maps these pairs to subbands 0–3; DPDK port 1 maps them to subbands
-4–7. The `subbands[].port` values `60000–60007` in `config.yaml` are outgoing
-result destination ports on `Storage_node_ip` and are unrelated to this fixed
-input mapping despite using the same numbers.
+interface, `60000/60001` are beam A X/Y, `60002/60003` are beam B X/Y,
+`60004/60005` are beam A X/Y for the next frequency range, and `60006/60007`
+are the matching beam B X/Y. DPDK port 0 maps these pairs to subbands 0–3;
+DPDK port 1 maps them to subbands 4–7. The `subbands[].port` values
+`60000–60007` in `config.yaml` are outgoing result destination ports on
+`Storage_node_ip` and are unrelated to this fixed input mapping despite using
+the same numbers.
 
 ## Control all receivers
 

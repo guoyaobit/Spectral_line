@@ -1,0 +1,70 @@
+---
+- name: Resolve the server ID for this host
+  set_fact:
+    spectral_line_effective_server_id: >-
+      {{ spectral_line_server_id | default(
+         inventory_hostname | regex_search('[0-9]+$')) }}
+
+- name: Require a server ID between zero and seven
+  assert:
+    that:
+      - spectral_line_effective_server_id | string is match('^[0-9]+$')
+      - spectral_line_effective_server_id | int >= 0
+      - spectral_line_effective_server_id | int <= 7
+    fail_msg: >-
+      Set spectral_line_server_id to an integer from 0 through 7 for
+      {{ inventory_hostname }}, or end its inventory hostname with that ID.
+
+- name: Select the static configuration file
+  set_fact:
+    spectral_line_effective_server_id: "{{ spectral_line_effective_server_id | int }}"
+    spectral_line_static_config_path: >-
+      {{ playbook_dir }}/configs/GPU{{ spectral_line_effective_server_id | int }}.yaml
+
+- name: Check the static configuration file
+  stat:
+    path: "{{ spectral_line_static_config_path }}"
+  delegate_to: localhost
+  become: false
+  register: spectral_line_static_config_stat
+
+- name: Require the static configuration file
+  assert:
+    that:
+      - spectral_line_static_config_stat.stat.exists
+      - spectral_line_static_config_stat.stat.isreg
+    fail_msg: "Static configuration not found: {{ spectral_line_static_config_path }}"
+
+- name: Read the static configuration for validation
+  include_vars:
+    file: "{{ spectral_line_static_config_path }}"
+    name: spectral_line_static_config
+  delegate_to: localhost
+  become: false
+
+- name: Validate the static server configuration
+  assert:
+    that:
+      - spectral_line_static_config.ServerID | int == spectral_line_effective_server_id | int
+      - spectral_line_static_config.subbands | length == 8
+      - spectral_line_static_config.subbands | map(attribute='beam') | list ==
+        ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B']
+      - spectral_line_static_config.subbands | map(attribute='port') | list ==
+        [60000, 60001, 60002, 60003, 60004, 60005, 60006, 60007]
+    fail_msg: >-
+      {{ spectral_line_static_config_path }} must have the matching ServerID,
+      exactly eight subbands, the A/B beam layout, and output ports 60000-60007.
+
+- name: Copy the static configuration to the server
+  copy:
+    src: "{{ spectral_line_static_config_path }}"
+    dest: "{{ spectral_line_install_dir }}/config.yaml"
+    owner: "{{ spectral_line_service_user }}"
+    group: "{{ spectral_line_service_user }}"
+    mode: "0644"
+
+- name: Report the selected static configuration
+  debug:
+    msg: >-
+      {{ inventory_hostname }} ServerID={{ spectral_line_effective_server_id }}
+      uses {{ spectral_line_static_config_path }}

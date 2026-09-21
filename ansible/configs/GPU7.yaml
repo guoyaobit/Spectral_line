@@ -1,0 +1,96 @@
+---
+# Complete static configuration for GPU7.
+# Edit this file on the Ansible controller, then deploy it with
+# ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml
+Debug: false
+ServerID: 7
+Memory_pool_per_stream: 8
+observation_mode: 1
+cal_mode: false
+noise_source:
+  period_ms: 1000
+  duty_cycle: 50
+integration_t: 1
+win_bw: 256e6
+win_channels: 65536
+Storage_node_ip: 192.168.101.11
+Storage_node_mac: 0c:42:a1:78:8f:bc
+Sender_Nic: ens81f0v0
+Baseband_Folder0: /data
+Baseband_Folder1: /data1
+Baseband_bits: 8
+subband_monitor: true
+subbands:
+  # port is the outgoing result destination port, not the 100G input port.
+  # DPDK port 0, input UDP 60000/60001: beam A, X/Y.
+  - gpu_id: 0
+    enable: true
+    beam: A
+    start_freq: 3968e6
+    end_freq: 4224e6
+    port: 60000
+    windows:
+      - center_freq: 4096e6
+  # DPDK port 0, input UDP 60002/60003: beam B, X/Y.
+  - gpu_id: 0
+    enable: true
+    beam: B
+    start_freq: 3968e6
+    end_freq: 4224e6
+    port: 60001
+    windows:
+      - center_freq: 4096e6
+  # DPDK port 0, input UDP 60004/60005: beam A, X/Y.
+  - gpu_id: 1
+    enable: true
+    beam: A
+    start_freq: 4224e6
+    end_freq: 4480e6
+    port: 60002
+    windows:
+      - center_freq: 4352e6
+  # DPDK port 0, input UDP 60006/60007: beam B, X/Y.
+  - gpu_id: 1
+    enable: true
+    beam: B
+    start_freq: 4224e6
+    end_freq: 4480e6
+    port: 60003
+    windows:
+      - center_freq: 4352e6
+  # DPDK port 1, input UDP 60000/60001: beam A, X/Y.
+  - gpu_id: 2
+    enable: true
+    beam: A
+    start_freq: 3968e6
+    end_freq: 4224e6
+    port: 60004
+    windows:
+      - center_freq: 4096e6
+  # DPDK port 1, input UDP 60002/60003: beam B, X/Y.
+  - gpu_id: 2
+    enable: true
+    beam: B
+    start_freq: 3968e6
+    end_freq: 4224e6
+    port: 60005
+    windows:
+      - center_freq: 4096e6
+  # DPDK port 1, input UDP 60004/60005: beam A, X/Y.
+  - gpu_id: 3
+    enable: true
+    beam: A
+    start_freq: 4224e6
+    end_freq: 4480e6
+    port: 60006
+    windows:
+      - center_freq: 4352e6
+  # DPDK port 1, input UDP 60006/60007: beam B, X/Y.
+  - gpu_id: 3
+    enable: true
+    beam: B
+    start_freq: 4224e6
+    end_freq: 4480e6
+    port: 60007
+    windows:
+      - center_freq: 4352e6

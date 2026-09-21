@@ -1,0 +1,13 @@
+---
+- name: Deploy per-server static configuration
+  hosts: spectral_line_servers
+  gather_facts: false
+  become: true
+
+  vars:
+    spectral_line_install_dir: /opt/Spectral_line
+    spectral_line_service_user: spectral-line
+
+  tasks:
+    - name: Copy the matching static config.yaml
+      include_tasks: tasks/configure-subbands.yml
