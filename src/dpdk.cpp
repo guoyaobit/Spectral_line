@@ -6,6 +6,7 @@
 
 #include <Globalcfg.hpp>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
@@ -16,6 +17,8 @@
 #include <rte_lcore.h>
 #include <rte_mbuf.h>
 #include <rte_udp.h>
+#include <sched.h>
+#include <sstream>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -493,15 +496,24 @@ std::vector<lcore_param>
 generate_lcore_params(const std::vector<uint16_t> &port_ids,
                       uint16_t queues_per_port, uint16_t start_dest_port) {
   std::vector<lcore_param> params;
-  std::vector<unsigned> next_lcore(RTE_MAX_NUMA_NODES, 1);
-  std::vector<unsigned> enabled_lcores;
+  std::vector<unsigned> worker_lcores;
+  std::vector<bool> assigned_lcores(RTE_MAX_LCORE, false);
+  const unsigned main_lcore = rte_get_main_lcore();
 
   unsigned lcore_id;
-  RTE_LCORE_FOREACH(lcore_id) { enabled_lcores.push_back(lcore_id); }
-
-  if (enabled_lcores.empty()) {
-    throw std::runtime_error("No enabled lcores found!");
+  RTE_LCORE_FOREACH(lcore_id) {
+    if (lcore_id != main_lcore)
+      worker_lcores.push_back(lcore_id);
   }
+
+  const size_t required_lcores = port_ids.size() * queues_per_port;
+  if (worker_lcores.size() < required_lcores) {
+    throw std::runtime_error(
+        "Not enough DPDK worker lcores: need " +
+        std::to_string(required_lcores) + ", found " +
+        std::to_string(worker_lcores.size()));
+  }
+
   int m_ring_id = 0;
   for (auto port : port_ids) {
     uint16_t nb_ports = rte_eth_dev_count_avail();
@@ -511,25 +523,25 @@ generate_lcore_params(const std::vector<uint16_t> &port_ids,
 
     for (uint16_t q = 0; q < queues_per_port; ++q) {
       unsigned assigned_lcore = RTE_MAX_LCORE;
-      uint16_t port_socket = rte_eth_dev_socket_id(port);
+      const int port_socket = rte_eth_dev_socket_id(port);
 
-      // Prefer a logical core on the port's NUMA node.
-      for (unsigned lc = next_lcore[port_socket]; lc < RTE_MAX_LCORE; ++lc) {
-        if (rte_lcore_is_enabled(lc) &&
-            rte_lcore_to_socket_id(lc) == port_socket) {
+      // Prefer an unused worker on the port's NUMA node.
+      for (auto lc : worker_lcores) {
+        if (!assigned_lcores[lc] && port_socket >= 0 &&
+            rte_lcore_to_socket_id(lc) ==
+                static_cast<unsigned>(port_socket)) {
           assigned_lcore = lc;
-          next_lcore[port_socket] = lc + 1;
           break;
         }
       }
 
-      // Fall back to another enabled logical core.
+      // Fall back to any unused worker lcore.
       if (assigned_lcore == RTE_MAX_LCORE) {
-        for (auto lc : enabled_lcores) {
-          if (lc >= next_lcore[port_socket])
-            continue; // Avoid assigning a core twice.
-          assigned_lcore = lc;
-          break;
+        for (auto lc : worker_lcores) {
+          if (!assigned_lcores[lc]) {
+            assigned_lcore = lc;
+            break;
+          }
         }
       }
 
@@ -538,6 +550,7 @@ generate_lcore_params(const std::vector<uint16_t> &port_ids,
                                  std::to_string(port) + ", queue " +
                                  std::to_string(q));
       }
+      assigned_lcores[assigned_lcore] = true;
 
       lcore_param p;
       p.port_id = port;
@@ -552,13 +565,53 @@ generate_lcore_params(const std::vector<uint16_t> &port_ids,
 
   return params;
 }
+
+// Map every CPU allowed by the current process affinity to a unique DPDK
+// lcore, up to the DPDK build's RTE_MAX_LCORE limit.
+static std::string build_eal_lcore_mapping() {
+  cpu_set_t affinity;
+  CPU_ZERO(&affinity);
+  if (sched_getaffinity(0, sizeof(affinity), &affinity) != 0) {
+    cfg.logger_->critical("Cannot read process CPU affinity: {}",
+                          std::strerror(errno));
+    std::exit(EXIT_FAILURE);
+  }
+
+  std::ostringstream mapping;
+  unsigned logical_lcore = 0;
+  for (int cpu = 0;
+       cpu < CPU_SETSIZE && logical_lcore < RTE_MAX_LCORE;
+       ++cpu) {
+    if (!CPU_ISSET(cpu, &affinity))
+      continue;
+    if (logical_lcore != 0)
+      mapping << ',';
+    mapping << logical_lcore << '@' << cpu;
+    ++logical_lcore;
+  }
+
+  if (logical_lcore == 0) {
+    cfg.logger_->critical("Process CPU affinity contains no usable CPUs");
+    std::exit(EXIT_FAILURE);
+  }
+
+  cfg.logger_->info("Enabling {} DPDK lcores from process CPU affinity",
+                    logical_lcore);
+  cfg.logger_->debug("DPDK EAL lcore mapping: {}", mapping.str());
+  return mapping.str();
+}
+
 int dpdk() {
-  char arg0[] = "7mm_recv";
-    char arg1[] = "-n";
-    char arg2[] = "4";
-    char *argv[] = {arg0, arg1, arg2, nullptr};
-    const int argc = static_cast<int>(sizeof(argv) / sizeof(argv[0])) - 1;
-  int ret = rte_eal_init(argc, argv);
+  std::string lcore_mapping = build_eal_lcore_mapping();
+  std::vector<std::string> eal_args = {
+      "7mm_recv", "--lcores", lcore_mapping, "-n", "4"};
+  std::vector<char *> eal_argv;
+  eal_argv.reserve(eal_args.size());
+  for (auto &arg : eal_args)
+    eal_argv.push_back(arg.data());
+
+  const int ret = rte_eal_init(static_cast<int>(eal_argv.size()),
+                               eal_argv.data());
   if (ret < 0)
     rte_exit(EXIT_FAILURE, "Error with EAL init\n");
 
@@ -579,8 +632,14 @@ int dpdk() {
   cfg.logger_->info("DPDK enabled lcores: {}, main lcore: {}",
                     rte_lcore_count(), rte_get_main_lcore());
 
-  auto lcore_params =
-      generate_lcore_params(ports, queues_per_port, start_dest_port);
+  std::vector<lcore_param> lcore_params;
+  try {
+    lcore_params =
+        generate_lcore_params(ports, queues_per_port, start_dest_port);
+  } catch (const std::exception &e) {
+    cfg.logger_->critical("Cannot assign DPDK workers: {}", e.what());
+    rte_exit(EXIT_FAILURE, "Cannot assign DPDK workers: %s\n", e.what());
+  }
   for (size_t i = 0; i < lcore_params.size(); ++i) {
     const size_t subband_index = i / 2; // Two queues per subband
     int launch_result = 0;
