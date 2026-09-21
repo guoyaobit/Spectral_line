@@ -461,23 +461,23 @@ public:
 // Noise source state
 //
 // EDV = 1
-// Word5 bit0
+// Word7 bit0 (the final VDIF header word)
 // =================================================
     bool getNoiseSourceState() const
     {
-        return (getWord(5)&0x1)!=0;
+        return (getWord(7)&0x1)!=0;
     }
 
     void setNoiseSourceState(bool on)
     {
-        uint32_t w=getWord(5);
+        uint32_t w=getWord(7);
 
         if(on)
             w|=1;
         else
             w&=~1u;
 
-        setWord(5,w);
+        setWord(7,w);
 
         // indicate extended data is valid
         setEDV(1);

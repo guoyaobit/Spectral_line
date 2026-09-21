@@ -47,12 +47,15 @@
       PATH: "/usr/local/cuda/bin:{{ ansible_env.PATH }}"
 
   tasks:
-    - name: Require a Debian-family Linux target
+    - name: Require a supported Debian or Ubuntu target
       assert:
         that:
           - ansible_system == "Linux"
           - ansible_os_family == "Debian"
-        fail_msg: This playbook currently supports Debian and Ubuntu targets.
+          - ansible_distribution in ["Debian", "Ubuntu"]
+        fail_msg: >-
+          This playbook supports Debian and Ubuntu targets only; detected
+          {{ ansible_distribution }} {{ ansible_distribution_version }}.
 
     - name: Install build dependencies
       apt:
@@ -98,17 +101,20 @@
         group: "{{ spectral_line_service_user }}"
         mode: "0755"
 
-    - name: Collect installed service facts
-      service_facts:
-
-    - name: Stop the installed services before replacing their files
-      systemd:
-        name: "{{ item }}"
-        state: stopped
+    - name: Check for installed service units
+      stat:
+        path: "/etc/systemd/system/{{ item }}"
       loop:
         - spectral-line.service
         - spectral-line-monitor.service
-      when: item in ansible_facts.services
+      register: spectral_line_installed_service_units
+
+    - name: Stop the installed services before replacing their files
+      systemd:
+        name: "{{ item.item }}"
+        state: stopped
+      loop: "{{ spectral_line_installed_service_units.results }}"
+      when: item.stat.exists
 
     - name: Deploy the controller source archive
       unarchive:
