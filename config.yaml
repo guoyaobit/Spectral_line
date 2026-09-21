@@ -23,77 +23,80 @@ Baseband_Folder1: /data1
 Baseband_bits: 8
 subband_monitor: true
 subbands:
-  # port is the destination UDP port on Storage_node_ip for spectrum results.
-  # recv dest port from FPGA is  60000,60001
-  # send to the storage node destination port 60000
-  #  subband 0
+  # Every `port` value below is the destination UDP port on Storage_node_ip
+  # used to send the processed spectrum result. It does NOT configure the
+  # fixed 100G DPDK input UDP ports, even though both ranges are 60000-60007.
+  # Input: DPDK port 0, UDP 60000 (X) and 60001 (Y).
+  # subband 0
   - gpu_id: 0
     enable: true
     start_freq: 384e6
     end_freq: 640e6
-    port: 60000
+    port: 60000 # result destination UDP port
     windows:
       - center_freq: 512e6
     # - center_freq: 2201e6
     # - center_freq: 2202e6
     # - center_freq: 2203e6
-  #  subband 1
-  # recv port from FPGA is  60002,60003
+  # subband 1: DPDK port 0, UDP 60002 (X) and 60003 (Y).
   - gpu_id: 0
     enable: true
     start_freq: 640e6
     end_freq: 896e6
-    port: 60001
+    port: 60001 # result destination UDP port
     windows:
       - center_freq: 768e6
     # - center_freq: 2501e6
     # - center_freq: 2502e6
     # - center_freq: 2503e6
-  # recv dest port from FPGA is  60003,60004
+  # subband 2: DPDK port 0, UDP 60004 (X) and 60005 (Y).
   - gpu_id: 1
     enable: true
     start_freq: 896e6
     end_freq: 1152e6
-    port: 60002
+    port: 60002 # result destination UDP port
     windows:
       - center_freq: 1024e6
-  # recv dest port from FPGA is  60004,60005
+  # subband 3: DPDK port 0, UDP 60006 (X) and 60007 (Y).
   - gpu_id: 1
     enable: true
     start_freq: 1152e6
     end_freq: 1408e6
-    port: 60003
+    port: 60003 # result destination UDP port
     windows:
       - center_freq: 1280e6
-  # recv dest port from FPGA is  60006,60007
+  # subband 4: DPDK port 1, UDP 60000 (X) and 60001 (Y).
   - gpu_id: 2
     enable: true
     start_freq: 1408e6
     end_freq: 1664e6
-    port: 60004
+    port: 60004 # result destination UDP port
     windows:
       - center_freq: 1536e6
 
+  # subband 5: DPDK port 1, UDP 60002 (X) and 60003 (Y).
   - gpu_id: 2
     enable: true
     start_freq: 1664e6
     end_freq: 1920e6
-    port: 60005
+    port: 60005 # result destination UDP port
     windows:
       - center_freq: 1792e6
 
+  # subband 6: DPDK port 1, UDP 60004 (X) and 60005 (Y).
   - gpu_id: 3
     enable: true
     start_freq: 1920e6
     end_freq: 2176e6
-    port: 60006
+    port: 60006 # result destination UDP port
     windows:
       - center_freq: 2048e6
 
+  # subband 7: DPDK port 1, UDP 60006 (X) and 60007 (Y).
   - gpu_id: 3
     enable: true
     start_freq: 2176e6
     end_freq: 2432e6
-    port: 60007
+    port: 60007 # result destination UDP port
     windows:
       - center_freq: 2304e6

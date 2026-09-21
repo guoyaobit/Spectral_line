@@ -7,6 +7,14 @@ and either sends spectrum windows over UDP or records VDIF baseband files.
 See [docs/deployment.md](docs/deployment.md) for host preparation, build,
 configuration, and start-up checks.
 
+Each of the two 100G DPDK interfaces receives UDP destination ports
+`60000–60007`. Ports `60000/60001` carry X/Y polarisation for one subband,
+`60002/60003` carry the next subband, and so on through `60006/60007`. DPDK
+port 0 supplies subbands 0–3 and DPDK port 1 supplies subbands 4–7. These input
+ports are independent of the result destination ports configured under
+`subbands[].port`. In the example configuration those output destination ports
+also use `60000–60007`, but they belong to the separate result-sending path.
+
 To distribute the controller's source tree, compile it on multiple servers,
 enable the monitor service, and install the receiver service for coordinated
 manual startup, use the included [Ansible playbook](ansible/README.md).

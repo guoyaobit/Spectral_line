@@ -8,12 +8,30 @@ and VDIF UDP input with a 32-byte VDIF header plus an 8192-byte payload. Test
 with a non-production NIC and data destination first: the program installs a
 catch-all DPDK drop rule on each input port.
 
-The runtime layout is fixed in the current source: two physical DPDK ports,
-eight queues per port, and up to eight subbands (two polarisation streams per
-subband). Spectrum results leave through a kernel-managed SR-IOV virtual
-function (VF), selected in `Sender_Nic`. Each configured `subbands[].port` is
-the destination UDP port on `Storage_node_ip`; it is not the local source port.
-Input flow rules currently listen on UDP ports 60000 through 60007.
+The runtime layout is fixed in the current source: two physical 100G DPDK
+ports, eight RX queues per port, and eight subbands with X/Y polarisation
+streams. Each 100G port independently receives the complete UDP destination
+port range `60000` through `60007`. Adjacent UDP ports form one subband: the
+even-numbered port carries X polarisation and the following odd-numbered port
+carries Y polarisation.
+
+| Fixed input UDP destination port | RX queue | Polarisation | Subband on DPDK port 0 | Subband on DPDK port 1 |
+|---:|---:|:---:|---:|---:|
+| 60000 | 0 | X | 0 | 4 |
+| 60001 | 1 | Y | 0 | 4 |
+| 60002 | 2 | X | 1 | 5 |
+| 60003 | 3 | Y | 1 | 5 |
+| 60004 | 4 | X | 2 | 6 |
+| 60005 | 5 | Y | 2 | 6 |
+| 60006 | 6 | X | 3 | 7 |
+| 60007 | 7 | Y | 3 | 7 |
+
+Packets arriving on other UDP destination ports are dropped by the catch-all
+DPDK flow rule. Spectrum results leave through a kernel-managed SR-IOV virtual
+function (VF), selected in `Sender_Nic`. Every configured `subbands[].port`
+value (`60000–60007` in the example configuration) is the outgoing result
+destination UDP port on `Storage_node_ip`. It is independent of the fixed 100G
+input-port mapping above and is not a local source port.
 
 ## Host prerequisites
 

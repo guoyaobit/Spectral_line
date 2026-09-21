@@ -135,6 +135,14 @@ value of `unavailable` means `ipmitool lan print` failed; verify IPMI device
 access and set `spectral_line_bmc_channel` if the LAN interface is not channel
 1.
 
+Both 100G DPDK ports receive UDP destination ports `60000–60007`. On each
+interface, `60000/60001` are the X/Y streams of one subband,
+`60002/60003` are the next, followed by `60004/60005` and `60006/60007`.
+DPDK port 0 maps these pairs to subbands 0–3; DPDK port 1 maps them to subbands
+4–7. The `subbands[].port` values `60000–60007` in `config.yaml` are outgoing
+result destination ports on `Storage_node_ip` and are unrelated to this fixed
+input mapping despite using the same numbers.
+
 ## Control all receivers
 
 Use the cluster control script from the repository root. It targets every host
