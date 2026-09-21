@@ -188,7 +188,10 @@ sudo journalctl -u spectral-line.service -f
 `journalctl -u spectral-line.service` for the complete journal, `-f` to follow
 new messages, or `--since today` to limit the time range. Receiver logs are
 written to both the systemd journal and timestamped `log_*.log` files under
-`/opt/Spectral_line`.
+`/opt/Spectral_line`. Systemd does not automatically restart `7mm`; the
+receiver process is expected to remain active until an explicit
+`systemctl stop spectral-line.service` terminates it. An unexpected exit is
+therefore visible as a failed or inactive service instead of a restart loop.
 
 The receiver unit runs as root because DPDK/VFIO access and the current static
 neighbor setup require elevated privileges. Do not start it until the required

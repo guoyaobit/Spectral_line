@@ -576,17 +576,42 @@ int dpdk() {
   if (port_init(1, mbuf_pool, queues_per_port) != 0)
     rte_exit(EXIT_FAILURE, " Cannot init port %" PRIu16 "\n", 0);
 
+  cfg.logger_->info("DPDK enabled lcores: {}, main lcore: {}",
+                    rte_lcore_count(), rte_get_main_lcore());
+
   auto lcore_params =
       generate_lcore_params(ports, queues_per_port, start_dest_port);
   for (size_t i = 0; i < lcore_params.size(); ++i) {
-      const size_t subband_index = i / 2; // Two queues per subband
+    const size_t subband_index = i / 2; // Two queues per subband
+    int launch_result = 0;
     if (cfg.subbands[subband_index]->enable) {
-      rte_eal_remote_launch(recv2mem, &lcore_params[i],
-                            lcore_params[i].lcore_id);
+      launch_result = rte_eal_remote_launch(
+          recv2mem, &lcore_params[i], lcore_params[i].lcore_id);
     } else {
-      rte_eal_remote_launch(locre_drop, &lcore_params[i],
-                            lcore_params[i].lcore_id);
+      launch_result = rte_eal_remote_launch(
+          locre_drop, &lcore_params[i], lcore_params[i].lcore_id);
     }
+
+    if (launch_result != 0) {
+      const int error_number = -launch_result;
+      cfg.logger_->critical(
+          "Failed to launch DPDK worker: port {}, queue {}, lcore {}, "
+          "error {} ({})",
+          lcore_params[i].port_id, lcore_params[i].queue_id,
+          lcore_params[i].lcore_id, launch_result,
+          std::strerror(error_number));
+      rte_exit(EXIT_FAILURE,
+               "Failed to launch DPDK worker: port %u, queue %u, "
+               "lcore %u, error %d (%s)\n",
+               static_cast<unsigned>(lcore_params[i].port_id),
+               static_cast<unsigned>(lcore_params[i].queue_id),
+               static_cast<unsigned>(lcore_params[i].lcore_id), launch_result,
+               std::strerror(error_number));
+    }
+
+    cfg.logger_->debug("Launched DPDK worker: port {}, queue {}, lcore {}",
+                       lcore_params[i].port_id, lcore_params[i].queue_id,
+                       lcore_params[i].lcore_id);
   }
   rte_eal_mp_wait_lcore();
   return 0;

@@ -156,4 +156,6 @@ ansible -i ansible/inventory.yml spectral_line_servers --become \
 ```
 
 These commands change the current runtime state only; the receiver remains
-disabled for automatic startup after a reboot.
+disabled for automatic startup after a reboot. Systemd does not automatically
+restart `7mm`; the process is designed to remain active until an explicit
+`systemctl stop` (or the cluster-wide stop command above) terminates it.
