@@ -278,7 +278,7 @@ static int recv2mem(void *args) {
        */
       const uint64_t m_seconds = header.getSecondsFromEpoch();
       const uint64_t m_frame_number = header.getFrameNumber();
-      const uint32_t m_NosieSoureState = header.getNoiseSourceState();
+      const uint32_t m_NoiseSourceState = header.getNoiseSourceState();
 
       /*
        * =====================================================
@@ -445,7 +445,7 @@ static int recv2mem(void *args) {
        */
       Packet *pkt = batch->pkts[pkt_idx_inbatch];
       batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
-      batch->noise_state[pkt_idx_inbatch] = m_NosieSoureState;
+      batch->noise_state[pkt_idx_inbatch] = m_NoiseSourceState;
       batch->hdrs[pkt_idx_inbatch] = header;
 
       /*
