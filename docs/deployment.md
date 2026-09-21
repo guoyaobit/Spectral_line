@@ -107,9 +107,11 @@ in the deployed
 `config.yaml` from the inventory variable `spectral_line_server_id`, or from
 the trailing digits of the inventory hostname when the variable is omitted.
 The resulting ID must be between 0 and 7. After deployment it also generates
-`ansible/deployment-summary.md` on the controller with each receiver's
-management IP, local BMC IP, 100G receiver addresses, live SR-IOV sender
-address, and subband frequency ranges. The BMC IP is read with
+`ansible/deployment-summary.md` on the controller with separate tables for each
+receiver's management IP, local BMC IP, 100G receiver addresses, live local
+SR-IOV sender address, configured storage destination, and subband frequency
+ranges. The local sender address is queried from the operating-system interface
+named by `Sender_Nic`; it is not taken from `Storage_node_ip`. The BMC IP is read with
 `ipmitool lan print` (channel 1 by default, configurable with
 `spectral_line_bmc_channel`). The 100G entries are discovered by mapping `mlx5_0`
 and `mlx5_1` to Linux interfaces with `ibdev2netdev`, then reading each
@@ -186,6 +188,16 @@ sudo systemctl disable --now spectral-line.service
 
 This installs the receiver without enabling it at boot. Start it explicitly
 only when the complete receiver cluster is ready.
+
+From the controller, start or stop the receiver on every inventory host with:
+
+```sh
+bash ansible/service-control.sh start
+bash ansible/service-control.sh stop
+```
+
+The same script accepts `restart` and `status`. It changes the current runtime
+state while keeping `spectral-line.service` disabled at boot.
 
 Control and inspect the receiver with standard systemd commands:
 

@@ -106,7 +106,7 @@
                  default([]) | length > 0)
              else (spectral_line_100g_interfaces | default([])) }}
 
-    - name: Read the SR-IOV sender interface IPv4 address
+    - name: Read the local SR-IOV sender interface IPv4 address
       command:
         argv:
           - ip
@@ -116,28 +116,28 @@
           - show
           - dev
           - "{{ spectral_line_summary_config.Sender_Nic }}"
-      register: spectral_line_summary_sriov_ip_command
+      register: spectral_line_summary_sender_local_ipv4_command
       changed_when: false
       failed_when: false
 
-    - name: Read the SR-IOV sender interface MAC address
+    - name: Read the local SR-IOV sender interface MAC address
       command:
         argv:
           - cat
           - "/sys/class/net/{{ spectral_line_summary_config.Sender_Nic }}/address"
-      register: spectral_line_summary_sriov_mac_command
+      register: spectral_line_summary_sender_local_mac_command
       changed_when: false
       failed_when: false
 
-    - name: Record the SR-IOV sender interface addresses
+    - name: Record the local SR-IOV sender interface addresses
       set_fact:
-        spectral_line_summary_sriov_ip: >-
-          {{ (spectral_line_summary_sriov_ip_command.stdout |
+        spectral_line_summary_sender_local_ipv4: >-
+          {{ (spectral_line_summary_sender_local_ipv4_command.stdout |
               regex_findall('inet\s+(\S+)') | first) |
               default('unavailable', true) }}
-        spectral_line_summary_sriov_mac: >-
-          {{ spectral_line_summary_sriov_mac_command.stdout |
-             default('unavailable', true) }}
+        spectral_line_summary_sender_local_mac: >-
+          {{ (spectral_line_summary_sender_local_mac_command.stdout |
+              trim) | default('unavailable', true) }}
 
 - name: Generate the receiver cluster summary
   hosts: localhost

@@ -114,9 +114,11 @@ huge pages, IOMMU, NIC bindings, SR-IOV configuration, reboots, or
 ## Generate the cluster summary
 
 Every successful deployment writes `ansible/deployment-summary.md` on the
-controller. The Markdown table contains each server's ID, management-network
-IP, local BMC IP, 100G receiver IP/MAC entries, live SR-IOV sender IP/MAC, and
-configured subband frequency ranges.
+controller. Separate Markdown tables contain server identity, management and
+BMC addresses, 100G receiver interfaces, SR-IOV sender interfaces, and subband
+frequency ranges. The sender interface IPv4/MAC values are read live from the
+local interface named by `Sender_Nic`; `Storage_node_ip` and
+`Storage_node_mac` are shown separately as configured destination values.
 
 Refresh the summary without rebuilding or restarting the receiver:
 
@@ -135,36 +137,21 @@ access and set `spectral_line_bmc_channel` if the LAN interface is not channel
 
 ## Control all receivers
 
-Start the receiver on every server:
+Use the cluster control script from the repository root. It targets every host
+in the `spectral_line_servers` inventory group and keeps the service disabled
+at boot:
 
 ```sh
-ansible -i ansible/inventory.yml spectral_line_servers --become \
-  -m systemd \
-  -a "name=spectral-line.service state=started"
+bash ansible/service-control.sh start
+bash ansible/service-control.sh stop
+bash ansible/service-control.sh restart
+bash ansible/service-control.sh status
 ```
 
-Stop every receiver:
+Pass a different inventory as the second argument when required:
 
 ```sh
-ansible -i ansible/inventory.yml spectral_line_servers --become \
-  -m systemd \
-  -a "name=spectral-line.service state=stopped"
-```
-
-Restart every receiver:
-
-```sh
-ansible -i ansible/inventory.yml spectral_line_servers --become \
-  -m systemd \
-  -a "name=spectral-line.service state=restarted"
-```
-
-Show the service state on every server:
-
-```sh
-ansible -i ansible/inventory.yml spectral_line_servers --become \
-  -m command \
-  -a "systemctl show spectral-line.service --property=ActiveState --value"
+bash ansible/service-control.sh status /path/to/inventory.yml
 ```
 
 These commands change the current runtime state only; the receiver remains
