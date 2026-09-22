@@ -128,6 +128,19 @@ receiver resources. Run the same operation without a rebuild with:
 ansible-playbook -i ansible/inventory.yml ansible/disable-desktop.yml
 ```
 
+Full deployment also installs and applies
+`/etc/sysctl.d/99-spectral-line.conf`. To update only the persistent kernel
+and network tuning on an existing cluster, run:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/configure-sysctl.yml \
+  --forks 10
+```
+
+The final configured `net.core.netdev_max_backlog` is `250000`.
+`net.ipv4.tcp_low_latency` is included only on kernels that expose its
+`/proc/sys` node.
+
 To restore desktop startup on a host, run `systemctl set-default
 graphical.target` followed by `systemctl start display-manager.service`.
 

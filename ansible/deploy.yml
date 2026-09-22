@@ -171,6 +171,9 @@
           This playbook supports Debian and Ubuntu targets only; detected
           {{ ansible_distribution }} {{ ansible_distribution_version }}.
 
+    - name: Configure kernel and network tuning
+      include_tasks: tasks/configure-sysctl.yml
+
     - name: Install build dependencies
       apt:
         name:

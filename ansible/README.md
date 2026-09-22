@@ -114,6 +114,27 @@ ansible-playbook -i ansible/inventory.yml ansible/disable-desktop.yml
 To restore graphical startup later, set `graphical.target` as the default and
 start `display-manager.service` on the affected hosts.
 
+## Apply kernel and network tuning
+
+A full deployment installs
+`/etc/sysctl.d/99-spectral-line.conf` and immediately applies it with
+`sysctl -p`. The managed settings enable SysRq, increase socket buffers and
+the network backlog, shorten TCP FIN timeout, disable TCP timestamps and SACK,
+and configure the requested semaphore and TCP memory limits.
+
+Apply or refresh only these settings on all existing servers with:
+
+```sh
+ansible-playbook -i ansible/inventory.yml ansible/configure-sysctl.yml \
+  --forks 10
+```
+
+The requested backlog values contained both `3000` and `250000`; the
+effective final value is configured once as `250000`. Some newer kernels do
+not expose `net.ipv4.tcp_low_latency`. Ansible enables it when the corresponding
+`/proc/sys` node exists and otherwise writes an explanatory comment so the
+remaining settings still load successfully.
+
 The controller creates a temporary archive of its current working tree. It
 excludes `.git`, `build`, `.venv`, log files, Python caches, and the private inventory.
 The archive is expanded into `/opt/Spectral_line` on each target, so local

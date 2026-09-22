@@ -1,0 +1,10 @@
+---
+- name: Configure Spectral_line kernel and network tuning
+  hosts: spectral_line_servers
+  gather_facts: false
+  become: true
+  strategy: free
+
+  tasks:
+    - name: Apply the shared sysctl configuration
+      include_tasks: tasks/configure-sysctl.yml

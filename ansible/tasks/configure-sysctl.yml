@@ -1,0 +1,22 @@
+---
+- name: Check whether tcp_low_latency is supported by the kernel
+  stat:
+    path: /proc/sys/net/ipv4/tcp_low_latency
+  register: spectral_line_tcp_low_latency
+
+- name: Install Spectral_line kernel and network tuning
+  template:
+    src: "{{ playbook_dir }}/templates/99-spectral-line.conf.j2"
+    dest: /etc/sysctl.d/99-spectral-line.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: spectral_line_sysctl_config
+
+- name: Apply Spectral_line kernel and network tuning
+  command:
+    argv:
+      - sysctl
+      - -p
+      - /etc/sysctl.d/99-spectral-line.conf
+  changed_when: spectral_line_sysctl_config.changed

@@ -395,7 +395,9 @@ public:
           w->header.subband_start_freq = sb->start_freq;
           w->header.subband_end_freq = sb->end_freq;
           w->header.beam_id = static_cast<uint8_t>(sb->beam);
-          // Each server supports at most eight subbands.
+          // Each server supports at most eight independently configured
+          // subband/beam entries. The global ID prevents storage collisions
+          // between servers with identical frequency ranges.
           w->header.subband_id = ServerID * 8 + sb->subband_id;
           w->header.start_freq_hz = w->start_freq;
           w->header.n_channels = win_channels;

@@ -1,0 +1,25 @@
+# Managed by Ansible for the Spectral_line receiver.
+# Edit this template on the controller; do not edit the deployed file.
+
+kernel.sysrq = 1
+kernel.sem = 1024 32000 32 32767
+
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.rmem_default = 16777216
+net.core.wmem_default = 16777216
+net.core.optmem_max = 16777216
+net.core.netdev_max_backlog = 250000
+
+net.ipv4.tcp_fin_timeout = 10
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.tcp_no_metrics_save = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv4.tcp_sack = 0
+net.ipv4.tcp_mem = 16777216 16777216 16777216
+{% if spectral_line_tcp_low_latency.stat.exists %}
+net.ipv4.tcp_low_latency = 1
+{% else %}
+# net.ipv4.tcp_low_latency is not provided by this kernel.
+{% endif %}
