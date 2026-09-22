@@ -3,7 +3,9 @@
 #include <chrono>
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <iostream>
+#include <random>
 #include <string>
 #include <sys/socket.h>
 #include <thread>
@@ -88,17 +90,10 @@ public:
     const char *payload_bytes = reinterpret_cast<const char *>(payload);
     const size_t header_size = sizeof(spectrum_header);
     const size_t chunk_data_size = 8192;
-    // A complete 65536-channel spectrum contains 128 UDP fragments. Without
-    // pacing, every GPU thread sends those fragments at line rate. When all
-    // eight processing servers are phase-aligned this creates a short burst
-    // from 64 independent spectra toward one storage port, even though the
-    // measured average traffic is small. About 75 us between 8 KiB fragments
-    // limits each logical stream to roughly 0.87 Gbit/s and keeps the combined
-    // peak below a 100-Gbit/s storage link without affecting integration rate.
-    constexpr auto fragment_pacing = std::chrono::microseconds(75);
-
     header.total_pkt = static_cast<uint16_t>(
         (payload_len + chunk_data_size - 1) / chunk_data_size);
+
+    apply_window_jitter();
 
     std::vector<char> buffer(header_size + chunk_data_size);
     size_t offset = 0;
@@ -118,14 +113,48 @@ public:
       }
 
       offset += chunk_size;
+      // Keep one completed spectrum from injecting all of its UDP fragments
+      // back-to-back at line rate. This delay is local to the current window;
+      // it does not use a shared limiter or cap the whole server's bandwidth.
       if (header.pkt_id + 1 < header.total_pkt)
-        std::this_thread::sleep_for(fragment_pacing);
+        std::this_thread::sleep_for(std::chrono::microseconds(20));
     }
 
     return true;
   }
 
 private:
+  static void apply_window_jitter() {
+    // GPU servers finish the same integration at nearly the same instant.
+    // Give every sending thread an independent delay before it queues a whole
+    // window, so windows from different subbands and servers do not arrive as
+    // one synchronized burst. After this phase offset, each window sends at
+    // the socket's original unrestricted rate.
+    constexpr uint32_t MAX_WINDOW_JITTER_US = 50000;
+    thread_local std::mt19937 generator([] {
+      std::random_device random_device;
+      const uint64_t clock_seed = static_cast<uint64_t>(
+          std::chrono::high_resolution_clock::now()
+              .time_since_epoch()
+              .count());
+      const uint64_t thread_seed = static_cast<uint64_t>(
+          std::hash<std::thread::id>{}(std::this_thread::get_id()));
+      const uint64_t process_seed = static_cast<uint64_t>(getpid());
+      std::seed_seq seeds{
+          random_device(), random_device(),
+          static_cast<uint32_t>(clock_seed),
+          static_cast<uint32_t>(clock_seed >> 32),
+          static_cast<uint32_t>(thread_seed),
+          static_cast<uint32_t>(thread_seed >> 32),
+          static_cast<uint32_t>(process_seed)};
+      return std::mt19937(seeds);
+    }());
+    thread_local std::uniform_int_distribution<uint32_t> jitter_us(
+        0, MAX_WINDOW_JITTER_US);
+    std::this_thread::sleep_for(
+        std::chrono::microseconds(jitter_us(generator)));
+  }
+
   int sockfd_;
   sockaddr_in dest_addr_;
 };
