@@ -191,8 +191,11 @@ public:
       YAML::Node config = YAML::LoadFile(filename);
       if (config["Debug"])
         Debug_mode = config["Debug"].as<bool>();
-      if (config["ServerID"])
-        ServerID = config["ServerID"].as<int>();
+      if (!config["ServerID"] || !config["ServerID"].IsScalar())
+        throw std::runtime_error("Configuration is missing ServerID");
+      ServerID = config["ServerID"].as<int>();
+      if (ServerID < 0 || ServerID > 7)
+        throw std::runtime_error("ServerID must be between 0 and 7");
       if (config["Memory_pool_per_stream"])
         Memory_pool_per_stream =
             config["Memory_pool_per_stream"].as<size_t>(); // GB
@@ -312,11 +315,8 @@ public:
         sb->enable = sbNode["enable"].as<bool>();
         std::string beam_name;
         if (!sbNode["beam"]) {
-          sb->beam = sb->subband_id < 4 ? BeamId::A : BeamId::B;
-          beam_name = sb->beam == BeamId::A ? "A" : "B";
-          logger_->warn(
-              "subband {} has no beam setting; defaulting to beam {}",
-              sb->subband_id, beam_name);
+          throw std::runtime_error(
+              "Every subband entry must specify beam A or B");
         } else if (!sbNode["beam"].IsScalar()) {
           throw std::runtime_error("Subband beam must be a scalar A or B");
         } else {
@@ -337,6 +337,9 @@ public:
         sb->start_freq = sbNode["start_freq"].as<double>();
         sb->end_freq = sbNode["end_freq"].as<double>();
         sb->port = sbNode["port"].as<int>();
+        if (sb->port <= 0 || sb->port > 65535)
+          throw std::runtime_error(
+              "Subband result destination port must be between 1 and 65535");
 
         if (!std::isfinite(sb->start_freq) ||
             !std::isfinite(sb->end_freq) ||
@@ -349,9 +352,11 @@ public:
               "Subband bandwidth must equal the 256 MHz sampling rate");
         }
 
-        if (!sbNode["windows"]) {
-          throw std::runtime_error("Configuration is missing windows");
-        }
+        if (!sbNode["windows"] || !sbNode["windows"].IsSequence() ||
+            sbNode["windows"].size() == 0 ||
+            sbNode["windows"].size() > 4)
+          throw std::runtime_error(
+              "Each enabled subband requires between 1 and 4 windows");
         int win_id = 0;
         for (const auto &winNode : sbNode["windows"]) {
           WindowConfig *w = new WindowConfig();
@@ -395,27 +400,69 @@ public:
           w->header.subband_start_freq = sb->start_freq;
           w->header.subband_end_freq = sb->end_freq;
           w->header.beam_id = static_cast<uint8_t>(sb->beam);
-          // Each server supports at most eight independently configured
-          // subband/beam entries. The global ID prevents storage collisions
-          // between servers with identical frequency ranges.
-          w->header.subband_id = ServerID * 8 + sb->subband_id;
+          // Every adjacent A/B pair represents one physical frequency
+          // subband. beam_id distinguishes the two beams, while the global
+          // subband ID spans 0-31 across GPU0-GPU7.
+          w->header.subband_id =
+              ServerID * 4 + sb->subband_id / 2;
           w->header.start_freq_hz = w->start_freq;
           w->header.n_channels = win_channels;
+          w->header.stokes = 4;
+          w->header.cal_mode = cal_mode ? 1 : 0;
           w->header.window_id = win_id++;
           logger_->info(
-              "subband {} beam {} window {}: requested center {:.9f} MHz, "
+              "subband config {} -> global {} beam {} window {}: "
+              "requested center {:.9f} MHz, "
               "output [{:.9f}, {:.9f}) MHz, channel width {:.9f} Hz, "
               "destination {}:{}",
-              sb->subband_id, beam_name, w->header.window_id,
-              w->center_freq / 1e6, w->start_freq / 1e6,
-              w->end_freq / 1e6, channel_bw_hz, Storage_node_ip, w->port);
+              sb->subband_id, w->header.subband_id, beam_name,
+              w->header.window_id, w->center_freq / 1e6,
+              w->start_freq / 1e6, w->end_freq / 1e6, channel_bw_hz,
+              Storage_node_ip, w->port);
           sb->windows.push_back(w);
         }
 
-        if (sb->windows.size() > 4) {
-          throw std::runtime_error("Each subband supports at most 4 windows");
-        }
         subbands.push_back(sb);
+      }
+
+      if (subbands.size() != 8)
+        throw std::runtime_error(
+            "Exactly 8 subband/beam entries are required per server");
+
+      // The static layout is four physical subbands per server. Each
+      // physical subband is represented by adjacent A and B entries, which
+      // must describe the same frequency range and window layout.
+      for (size_t pair = 0; pair < 4; ++pair) {
+        const auto *beam_a = subbands[pair * 2];
+        const auto *beam_b = subbands[pair * 2 + 1];
+        if (beam_a->beam != BeamId::A || beam_b->beam != BeamId::B) {
+          throw std::runtime_error(
+              "Subband entries must be ordered as A/B pairs");
+        }
+        if (beam_a->enable != beam_b->enable) {
+          throw std::runtime_error(
+              "Both beams in a physical subband must have the same enable state");
+        }
+        if (!beam_a->enable)
+          continue;
+        if (std::abs(beam_a->start_freq - beam_b->start_freq) > 0.5 ||
+            std::abs(beam_a->end_freq - beam_b->end_freq) > 0.5) {
+          throw std::runtime_error(
+              "A/B entries in a physical subband must have the same frequency range");
+        }
+        if (beam_a->windows.size() != beam_b->windows.size()) {
+          throw std::runtime_error(
+              "A/B entries in a physical subband must have the same windows");
+        }
+        for (size_t window = 0; window < beam_a->windows.size(); ++window) {
+          if (std::abs(beam_a->windows[window]->start_freq -
+                       beam_b->windows[window]->start_freq) > 0.5 ||
+              std::abs(beam_a->windows[window]->end_freq -
+                       beam_b->windows[window]->end_freq) > 0.5) {
+            throw std::runtime_error(
+                "A/B entries in a physical subband must have matching window frequencies");
+          }
+        }
       }
     } catch (const std::exception &e) {
       logger_->error("Configuration parsing failed: {}", e.what());

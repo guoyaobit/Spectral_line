@@ -51,9 +51,20 @@
         ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B']
       - spectral_line_static_config.subbands | map(attribute='port') | list ==
         [60000, 60001, 60002, 60003, 60004, 60005, 60006, 60007]
+      - spectral_line_static_config.subbands | map(attribute='gpu_id') | list ==
+        [0, 0, 1, 1, 2, 2, 3, 3]
+      - spectral_line_static_config.subbands[0].start_freq == spectral_line_static_config.subbands[1].start_freq
+      - spectral_line_static_config.subbands[0].end_freq == spectral_line_static_config.subbands[1].end_freq
+      - spectral_line_static_config.subbands[2].start_freq == spectral_line_static_config.subbands[3].start_freq
+      - spectral_line_static_config.subbands[2].end_freq == spectral_line_static_config.subbands[3].end_freq
+      - spectral_line_static_config.subbands[4].start_freq == spectral_line_static_config.subbands[5].start_freq
+      - spectral_line_static_config.subbands[4].end_freq == spectral_line_static_config.subbands[5].end_freq
+      - spectral_line_static_config.subbands[6].start_freq == spectral_line_static_config.subbands[7].start_freq
+      - spectral_line_static_config.subbands[6].end_freq == spectral_line_static_config.subbands[7].end_freq
     fail_msg: >-
       {{ spectral_line_static_config_path }} must have the matching ServerID,
-      exactly eight subbands, the A/B beam layout, and output ports 60000-60007.
+      exactly eight subbands, the A/B beam layout, GPU layout, matching A/B
+      frequency ranges, and output ports 60000-60007.
 
 - name: Copy the static configuration to the server
   copy:

@@ -335,13 +335,35 @@ public:
             // Use the midpoint of the accumulated FFT intervals.
             m_config->windows[i]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
             m_config->windows[i]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
-            m_config->windows[i]->sender.send_spectrum(m_config->windows[i]->header, &slot.data[start_idx], channels * sizeof(float4));
+            if (!m_config->windows[i]->sender.send_spectrum(
+                    m_config->windows[i]->header, &slot.data[start_idx],
+                    channels * sizeof(float4))) {
+              cfg.logger_->error(
+                  "Failed to send spectrum subband {}, beam {}, window {}, "
+                  "integration {}",
+                  m_config->windows[i]->header.subband_id,
+                  m_config->windows[i]->header.beam_id,
+                  m_config->windows[i]->header.window_id,
+                  m_config->windows[i]->header.integration_id);
+            }
+            ++m_config->windows[i]->header.integration_id;
           }
       }
       if( cfg.observation_mode == ObservationMode::CONTINUUM) {
             m_config->windows[0]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
             m_config->windows[0]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
-            m_config->windows[0]->sender.send_spectrum(m_config->windows[0]->header, &slot.sumPower, sizeof(float));
+            if (!m_config->windows[0]->sender.send_spectrum(
+                    m_config->windows[0]->header, &slot.sumPower,
+                    sizeof(float))) {
+              cfg.logger_->error(
+                  "Failed to send continuum subband {}, beam {}, window {}, "
+                  "integration {}",
+                  m_config->windows[0]->header.subband_id,
+                  m_config->windows[0]->header.beam_id,
+                  m_config->windows[0]->header.window_id,
+                  m_config->windows[0]->header.integration_id);
+            }
+            ++m_config->windows[0]->header.integration_id;
       }
         slot.used.store(false, std::memory_order_release);
         idx = (idx + 1) % NUM_SLOTS;

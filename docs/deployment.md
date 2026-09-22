@@ -211,6 +211,10 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   `spectrum_header.beam_id`, where `0` means beam A and `1` means beam B. The
   field reuses one byte of the former two-byte reserved area, so the packed
   header remains 95 bytes and offsets of all preceding fields remain unchanged.
+  Adjacent A/B configuration entries share one physical subband ID. The sender
+  calculates the global `spectrum_header.subband_id` as
+  `ServerID * 4 + local_config_index / 2`, producing IDs 0 through 31 across
+  GPU0 through GPU7; `beam_id` keeps A and B distinct.
 - `Storage_node_ip` and `Storage_node_mac`: address of the result receiver.
 - `Sender_Nic`: name of the kernel-managed SR-IOV VF used to reach the result
   receiver; the example configuration uses `ens81f0v0`. The current code uses
