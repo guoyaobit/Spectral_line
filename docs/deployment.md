@@ -79,8 +79,9 @@ available while performing this step.
 Run from the repository root:
 
 ```sh
-meson setup build --buildtype=release
-meson compile -C build
+rm -rf build
+meson setup build
+ninja -C build
 ```
 
 The executable is `build/7mm`. If CUDA is not installed under
@@ -111,12 +112,12 @@ ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10 \
 ```
 
 This mode preserves the remote `config.yaml` and `.venv`, stops the receiver,
-deletes the previous `build` directory, creates a clean Meson release build,
-compiles and verifies `build/7mm`, and skips dependency installation, desktop
-settings, systemd unit installation, monitor changes, and summary generation.
-It leaves the receiver stopped for coordinated cluster startup. Full
-deployments also remove the previous build directory before configuring and
-compiling.
+deletes the previous `build` directory, creates a clean Meson build, compiles
+it with `ninja -C build`, verifies `build/7mm`, and skips dependency
+installation, desktop settings, systemd unit installation, monitor changes,
+and summary generation. It leaves the receiver stopped for coordinated cluster
+startup. Full deployments also remove the previous build directory before
+running `meson setup build` and `ninja -C build`.
 
 The playbook stops the graphical display manager on every receiver and changes
 the default boot target to `multi-user.target`. This leaves SSH, networking,

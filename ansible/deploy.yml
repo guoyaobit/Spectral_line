@@ -112,23 +112,13 @@
         state: absent
       when: spectral_line_update_only | default(false) | bool
 
-    - name: Create an empty build directory for the code update
-      file:
-        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
-        state: directory
-        owner: "{{ spectral_line_service_user }}"
-        group: "{{ spectral_line_service_user }}"
-        mode: "0755"
-      when: spectral_line_update_only | default(false) | bool
-
-    - name: Configure a clean release build for the code update
+    - name: Configure a clean build for the code update
       become_user: "{{ spectral_line_service_user }}"
       command:
         argv:
           - meson
           - setup
           - "{{ spectral_line_build_dir }}"
-          - --buildtype=release
         chdir: "{{ spectral_line_install_dir }}"
       environment: "{{ spectral_line_build_environment }}"
       when: spectral_line_update_only | default(false) | bool
@@ -137,8 +127,7 @@
       become_user: "{{ spectral_line_service_user }}"
       command:
         argv:
-          - meson
-          - compile
+          - ninja
           - -C
           - "{{ spectral_line_build_dir }}"
         chdir: "{{ spectral_line_install_dir }}"
@@ -269,22 +258,13 @@
         path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
         state: absent
 
-    - name: Create an empty build directory
-      file:
-        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
-        state: directory
-        owner: "{{ spectral_line_service_user }}"
-        group: "{{ spectral_line_service_user }}"
-        mode: "0755"
-
-    - name: Configure a clean release build
+    - name: Configure a clean build
       become_user: "{{ spectral_line_service_user }}"
       command:
         argv:
           - meson
           - setup
           - "{{ spectral_line_build_dir }}"
-          - --buildtype=release
         chdir: "{{ spectral_line_install_dir }}"
       environment: "{{ spectral_line_build_environment }}"
 
@@ -292,8 +272,7 @@
       become_user: "{{ spectral_line_service_user }}"
       command:
         argv:
-          - meson
-          - compile
+          - ninja
           - -C
           - "{{ spectral_line_build_dir }}"
         chdir: "{{ spectral_line_install_dir }}"
