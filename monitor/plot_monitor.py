@@ -51,6 +51,8 @@ IMAGE_KINDS = (
 HIGH_JPEG_QUALITY = 92
 LOW_JPEG_QUALITY = 80
 STREAM_NAME_RE = re.compile(r"^server_(\d+)_stream_(\d+)\.bin$")
+STREAMS_PER_SUBBAND = 4
+SUBBANDS_PER_SERVER = 4
 
 
 def parse_args():
@@ -127,15 +129,31 @@ def decode_stream_identity(filename):
         raise ValueError("stream ID must be between 0 and 15: %s" % filename.name)
 
     return {
-        "subband": server_id * 4 + stream_id // 4,
+        # Monitor output uses one-based subband numbers: GPU0 starts at 1 and
+        # GPU7 ends at 32. The processing protocol remains zero-based.
+        # Four monitor streams represent A/B and X/Y for one subband.
+        "subband": (
+            server_id * SUBBANDS_PER_SERVER
+            + stream_id // STREAMS_PER_SUBBAND
+            + 1
+        ),
         "beam": "A" if (stream_id // 2) % 2 == 0 else "B",
         "polarization": "X" if stream_id % 2 == 0 else "Y",
     }
 
 
+def plot_title(identity, kind):
+    return "Subband %d · Beam %s · Pol %s · %s" % (
+        identity["subband"],
+        identity["beam"],
+        identity["polarization"],
+        kind,
+    )
+
+
 def image_filename(identity, type_id, quality):
-    if not 0 <= identity["subband"] <= 31:
-        raise ValueError("subband ID must be between 0 and 31")
+    if not 1 <= identity["subband"] <= 32:
+        raise ValueError("subband ID must be between 1 and 32")
     if identity["beam"] not in ("A", "B"):
         raise ValueError("beam must be A or B")
     if identity["polarization"] not in ("X", "Y"):
@@ -197,7 +215,7 @@ def render_adc(real, imag, output_dir, identity):
     try:
         axes.plot(time_us, real[:count], linewidth=0.8, label="Real")
         axes.plot(time_us, imag[:count], linewidth=0.8, alpha=0.8, label="Imag")
-        axes.set_title("Raw ADC Samples")
+        axes.set_title(plot_title(identity, "Raw ADC Samples"))
         axes.set_xlabel("Time (us)")
         axes.set_ylabel("ADC value")
         #axes.set_ylim(-132, 132)
@@ -222,7 +240,7 @@ def render_fft(real, imag, output_dir, identity):
     figure, axes = plt.subplots(figsize=HIGH_SIZE)
     try:
         axes.plot(frequency_mhz, power_db, linewidth=0.8)
-        axes.set_title("FFT Spectrum")
+        axes.set_title(plot_title(identity, "FFT Spectrum"))
         axes.set_xlabel("Frequency (MHz)")
         axes.set_ylabel("Relative power (dB)")
         axes.set_xlim(frequency_mhz[0], frequency_mhz[-1])
@@ -253,7 +271,7 @@ def render_histogram(real, imag, output_dir, identity):
             label="Imag",
             color="tab:orange",
         )
-        axes.set_title("ADC Value Distribution")
+        axes.set_title(plot_title(identity, "ADC Value Distribution"))
         axes.set_xlabel("ADC value")
         axes.set_ylabel("Probability density")
         axes.set_xlim(-128, 127)
