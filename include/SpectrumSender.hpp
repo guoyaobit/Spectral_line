@@ -1,10 +1,12 @@
 #pragma once
 #include <arpa/inet.h>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <string>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 #pragma pack(push, 1)
@@ -86,6 +88,14 @@ public:
     const char *payload_bytes = reinterpret_cast<const char *>(payload);
     const size_t header_size = sizeof(spectrum_header);
     const size_t chunk_data_size = 8192;
+    // A complete 65536-channel spectrum contains 128 UDP fragments. Without
+    // pacing, every GPU thread sends those fragments at line rate. When all
+    // eight processing servers are phase-aligned this creates a short burst
+    // from 64 independent spectra toward one storage port, even though the
+    // measured average traffic is small. About 75 us between 8 KiB fragments
+    // limits each logical stream to roughly 0.87 Gbit/s and keeps the combined
+    // peak below a 100-Gbit/s storage link without affecting integration rate.
+    constexpr auto fragment_pacing = std::chrono::microseconds(75);
 
     header.total_pkt = static_cast<uint16_t>(
         (payload_len + chunk_data_size - 1) / chunk_data_size);
@@ -108,6 +118,8 @@ public:
       }
 
       offset += chunk_size;
+      if (header.pkt_id + 1 < header.total_pkt)
+        std::this_thread::sleep_for(fragment_pacing);
     }
 
     return true;
