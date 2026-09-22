@@ -325,6 +325,16 @@ After every successful batch, `/dev/shm/monitor_plots/manifest.json` is replaced
 atomically. If any changed stream fails to render, the previous manifest stays
 active and the changed streams are retried during the next scan.
 
+Monitor images are JPEG files named
+`<subband>_<beam>_<polarization>_<type>_<quality>.jpg`. The global subband
+number is `ServerID * 4 + stream_id / 4`, producing IDs 0 through 31 across
+GPU0 through GPU7. Beam A/B and polarization X/Y are derived from the fixed
+input stream order. Type `1` is raw ADC, type `2` is the
+normal-distribution histogram, and type `3` is the frequency spectrum.
+High-resolution files end in `_hq.jpg`; thumbnails end in `_lq.jpg`.
+Both qualities are written directly to `/dev/shm/monitor_plots/`; no
+`high_resolution` or `thumbnails` subdirectories are used.
+
 After updating the repository, refresh the environment and restart only the
 monitor service:
 

@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import time
 
 import matplotlib
@@ -43,10 +44,13 @@ THUMBNAIL_PIXELS = (320, 120)
 MAX_STREAMS = 16
 DEFAULT_WORKERS = min(MAX_STREAMS, os.cpu_count() or 1)
 IMAGE_KINDS = (
-    ("adc", "adc_raw"),
-    ("fft", "fft_spectrum"),
-    ("histogram", "adc_histogram"),
+    ("adc", 1),
+    ("histogram", 2),
+    ("fft", 3),
 )
+HIGH_JPEG_QUALITY = 92
+LOW_JPEG_QUALITY = 80
+STREAM_NAME_RE = re.compile(r"^server_(\d+)_stream_(\d+)\.bin$")
 
 
 def parse_args():
@@ -110,28 +114,70 @@ def temporary_path(destination):
     )
 
 
-def save_versions(figure, output_dir, name):
-    high_dir = output_dir / "high_resolution"
-    thumbnail_dir = output_dir / "thumbnails"
-    high_dir.mkdir(parents=True, exist_ok=True)
-    thumbnail_dir.mkdir(parents=True, exist_ok=True)
+def decode_stream_identity(filename):
+    match = STREAM_NAME_RE.fullmatch(filename.name)
+    if match is None:
+        raise ValueError("invalid monitor stream filename: %s" % filename.name)
 
-    high_path = high_dir / (name + ".png")
-    thumbnail_path = thumbnail_dir / (name + ".png")
+    server_id = int(match.group(1))
+    stream_id = int(match.group(2))
+    if not 0 <= server_id <= 7:
+        raise ValueError("server ID must be between 0 and 7: %s" % filename.name)
+    if not 0 <= stream_id <= 15:
+        raise ValueError("stream ID must be between 0 and 15: %s" % filename.name)
+
+    return {
+        "subband": server_id * 4 + stream_id // 4,
+        "beam": "A" if (stream_id // 2) % 2 == 0 else "B",
+        "polarization": "X" if stream_id % 2 == 0 else "Y",
+    }
+
+
+def image_filename(identity, type_id, quality):
+    if not 0 <= identity["subband"] <= 31:
+        raise ValueError("subband ID must be between 0 and 31")
+    if identity["beam"] not in ("A", "B"):
+        raise ValueError("beam must be A or B")
+    if identity["polarization"] not in ("X", "Y"):
+        raise ValueError("polarization must be X or Y")
+    if type_id not in (1, 2, 3):
+        raise ValueError("image type must be 1, 2, or 3")
+    if quality not in ("hq", "lq"):
+        raise ValueError("image quality must be hq or lq")
+    return "%d_%s_%s_%d_%s.jpg" % (
+        identity["subband"],
+        identity["beam"],
+        identity["polarization"],
+        type_id,
+        quality,
+    )
+
+
+def save_versions(figure, output_dir, identity, type_id):
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    high_path = output_dir / image_filename(identity, type_id, "hq")
+    thumbnail_path = output_dir / image_filename(identity, type_id, "lq")
     high_temporary = temporary_path(high_path)
     thumbnail_temporary = temporary_path(thumbnail_path)
 
     try:
         figure.savefig(
             high_temporary,
-            format="png",
+            format="jpeg",
             dpi=HIGH_DPI,
             bbox_inches="tight",
             facecolor="white",
+            pil_kwargs={"quality": HIGH_JPEG_QUALITY, "optimize": True},
         )
         with Image.open(high_temporary) as image:
             image.thumbnail(THUMBNAIL_PIXELS, THUMBNAIL_RESAMPLE)
-            image.save(thumbnail_temporary, format="PNG", optimize=True)
+            image.save(
+                thumbnail_temporary,
+                format="JPEG",
+                quality=LOW_JPEG_QUALITY,
+                optimize=True,
+            )
 
         # Each file is always complete when it becomes visible to readers.
         high_temporary.replace(high_path)
@@ -143,7 +189,7 @@ def save_versions(figure, output_dir, name):
     return high_path, thumbnail_path
 
 
-def render_adc(real, imag, output_dir, prefix):
+def render_adc(real, imag, output_dir, identity):
     count = min(ADC_PLOT_SAMPLES, real.size)
     sample_index = np.arange(count)
     time_us = sample_index / SAMPLE_RATE * 1e6
@@ -158,12 +204,12 @@ def render_adc(real, imag, output_dir, prefix):
         axes.grid(alpha=0.3)
         axes.legend(loc="upper right", ncol=2)
         figure.tight_layout()
-        return save_versions(figure, output_dir, prefix + "_adc_raw")
+        return save_versions(figure, output_dir, identity, 1)
     finally:
         plt.close(figure)
 
 
-def render_fft(real, imag, output_dir, prefix):
+def render_fft(real, imag, output_dir, identity):
     signal = real.astype(np.float32) + 1j * imag.astype(np.float32)
     spectrum = np.fft.fftshift(np.fft.fft(signal))
     power = np.abs(spectrum) ** 2
@@ -182,12 +228,12 @@ def render_fft(real, imag, output_dir, prefix):
         axes.set_xlim(frequency_mhz[0], frequency_mhz[-1])
         axes.grid(alpha=0.3)
         figure.tight_layout()
-        return save_versions(figure, output_dir, prefix + "_fft_spectrum")
+        return save_versions(figure, output_dir, identity, 3)
     finally:
         plt.close(figure)
 
 
-def render_histogram(real, imag, output_dir, prefix):
+def render_histogram(real, imag, output_dir, identity):
     bins = np.arange(-128.5, 128.6, 2.0)
     figure, axes = plt.subplots(figsize=HIGH_SIZE)
     try:
@@ -214,36 +260,74 @@ def render_histogram(real, imag, output_dir, prefix):
         axes.grid(axis="y", alpha=0.3)
         axes.legend(loc="upper right")
         figure.tight_layout()
-        return save_versions(figure, output_dir, prefix + "_adc_histogram")
+        return save_versions(figure, output_dir, identity, 2)
     finally:
         plt.close(figure)
 
 
-def render_stream(prefix, snapshot, output_dir):
+def render_stream(identity, snapshot, output_dir):
     real, imag = decode_adc(snapshot)
     
     saved = []
-    saved.extend(render_adc(real, imag, output_dir, prefix))
-    saved.extend(render_fft(real, imag, output_dir, prefix))
-    saved.extend(render_histogram(real, imag, output_dir, prefix))
+    saved.extend(render_adc(real, imag, output_dir, identity))
+    saved.extend(render_histogram(real, imag, output_dir, identity))
+    saved.extend(render_fft(real, imag, output_dir, identity))
     return saved
 
 
-def manifest_entry(filename, digest):
+def manifest_entry(filename, digest, identity):
     images = {}
-    for kind, suffix in IMAGE_KINDS:
-        image_name = "%s_%s.png" % (filename.stem, suffix)
+    for kind, type_id in IMAGE_KINDS:
         images[kind] = {
-            "thumbnail": "thumbnails/" + image_name,
-            "high_resolution": "high_resolution/" + image_name,
+            "type_id": type_id,
+            "thumbnail": image_filename(identity, type_id, "lq"),
+            "high_resolution": image_filename(identity, type_id, "hq"),
         }
     return {
         "name": filename.stem,
         "source": filename.name,
+        "subband": identity["subband"],
+        "beam": identity["beam"],
+        "polarization": identity["polarization"],
         "revision": digest.hex(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "images": images,
     }
+
+
+def remove_legacy_images():
+    removed = 0
+    for path in OUTPUT_DIR.glob("server_*_stream_*.png"):
+        try:
+            path.unlink(missing_ok=True)
+            removed += 1
+        except OSError as error:
+            print(
+                "Cannot remove legacy monitor image %s: %s" % (path, error),
+                flush=True,
+            )
+
+    for directory_name in ("high_resolution", "thumbnails"):
+        directory = OUTPUT_DIR / directory_name
+        if not directory.is_dir():
+            continue
+        for pattern in ("*.png", "*.jpg"):
+            for path in directory.glob(pattern):
+                try:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+                except OSError as error:
+                    print(
+                        "Cannot remove legacy monitor image %s: %s"
+                        % (path, error),
+                        flush=True,
+                    )
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+    if removed:
+        print("Removed %d legacy monitor image(s)." % removed, flush=True)
 
 
 def publish_manifest(entries):
@@ -262,6 +346,7 @@ def publish_manifest(entries):
             encoding="utf-8",
         )
         temporary.replace(destination)
+        remove_legacy_images()
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -273,11 +358,12 @@ def collect_updates(previous_digests, reported_errors):
     )
     for filename in stream_files:
         try:
+            identity = decode_stream_identity(filename)
             snapshot, digest = read_monitor_snapshot(filename)
             if previous_digests.get(filename) != digest:
-                updates.append((filename, snapshot, digest))
+                updates.append((filename, snapshot, digest, identity))
             reported_errors.pop(filename, None)
-        except (OSError, RuntimeError) as error:
+        except (OSError, RuntimeError, ValueError) as error:
             message = str(error)
             if reported_errors.get(filename) != message:
                 print("Skipped %s: %s" % (filename, message), flush=True)
@@ -307,19 +393,19 @@ def run_monitor(render_once):
 
             futures = {
                 executor.submit(
-                    render_stream, filename.stem, snapshot, OUTPUT_DIR
-                ): (filename, digest)
-                for filename, snapshot, digest in updates
+                    render_stream, identity, snapshot, OUTPUT_DIR
+                ): (filename, digest, identity)
+                for filename, snapshot, digest, identity in updates
             }
 
             rendered = 0
             cycle_succeeded = True
             completed = []
             for future in as_completed(futures):
-                filename, digest = futures[future]
+                filename, digest, identity = futures[future]
                 try:
                     saved = future.result()
-                    completed.append((filename, digest))
+                    completed.append((filename, digest, identity))
                     rendered += 1
                     print(
                         "Updated %s (%d images)." % (filename.name, len(saved)),
@@ -330,10 +416,10 @@ def run_monitor(render_once):
                     print("Failed %s: %s" % (filename, error), flush=True)
 
             if cycle_succeeded:
-                for filename, digest in completed:
+                for filename, digest, identity in completed:
                     digests[filename] = digest
                     manifest_entries[filename.stem] = manifest_entry(
-                        filename, digest
+                        filename, digest, identity
                     )
 
             if cycle_succeeded and (

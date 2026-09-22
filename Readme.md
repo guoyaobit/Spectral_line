@@ -35,10 +35,19 @@ python monitor/plot_monitor.py
 With no arguments, the script continuously scans
 `/dev/shm/server_*_stream_*.bin`. Whenever a stream changes, worker processes
 simultaneously regenerate its three 300-DPI images and three 320x120 thumbnails
-under `/dev/shm/monitor_plots/`. Thumbnails are downscaled from the high-quality
-render instead of being plotted a second time. Images are replaced atomically,
-so readers never observe partially written PNGs. Run
+directly under `/dev/shm/monitor_plots/`; no quality-specific subdirectories
+are created. Thumbnails are downscaled from the high-quality render instead of
+being plotted a second time. Images are replaced atomically,
+so readers never observe partially written JPEGs. Image names use
+`<subband>_<beam>_<polarization>_<type>_<quality>.jpg`, where subband is
+`0–31`, beam is `A` or `B`, polarization is `X` or `Y`, type is
+`1` (raw ADC), `2` (normal-distribution histogram), or `3` (frequency
+spectrum), and quality is `hq` or `lq`. For example:
+`1_A_X_1_hq.jpg` and `2_B_Y_2_lq.jpg`. Run
 `python monitor/plot_monitor.py --once` for a single update.
+After the first successful JPEG manifest is published, legacy
+`server_*_stream_*.png` images and images in the old `high_resolution` and
+`thumbnails` directories are removed.
 
 The receiver creates a stream's monitor file only after that stream receives
 its first valid packet. Missing-input streams therefore do not appear as empty
