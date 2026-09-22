@@ -110,11 +110,13 @@ ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10 \
   -e spectral_line_update_only=true
 ```
 
-This mode preserves the remote `config.yaml` and `.venv`, reconfigures or
-creates the Meson build, compiles and verifies `build/7mm`, and skips dependency
-installation, desktop settings, systemd unit installation, monitor changes,
-and summary generation. It stops the receiver before rebuilding and leaves it
-stopped for coordinated cluster startup.
+This mode preserves the remote `config.yaml` and `.venv`, stops the receiver,
+deletes the previous `build` directory, creates a clean Meson release build,
+compiles and verifies `build/7mm`, and skips dependency installation, desktop
+settings, systemd unit installation, monitor changes, and summary generation.
+It leaves the receiver stopped for coordinated cluster startup. Full
+deployments also remove the previous build directory before configuring and
+compiling.
 
 The playbook stops the graphical display manager on every receiver and changes
 the default boot target to `multi-user.target`. This leaves SSH, networking,

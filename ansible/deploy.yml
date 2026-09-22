@@ -79,15 +79,6 @@
           - ./config.yaml
       when: spectral_line_update_only | default(false) | bool
 
-    - name: Ensure the existing build directory is writable for the update
-      file:
-        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
-        state: directory
-        owner: "{{ spectral_line_service_user }}"
-        group: "{{ spectral_line_service_user }}"
-        recurse: true
-      when: spectral_line_update_only | default(false) | bool
-
     - name: Verify build tools and libraries for the code update
       become_user: "{{ spectral_line_service_user }}"
       command:
@@ -101,54 +92,46 @@
       changed_when: false
       when: spectral_line_update_only | default(false) | bool
 
-    - name: Check the Meson configuration for the code update
-      stat:
-        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/build.ninja"
-      register: spectral_line_update_build_config
-      when: spectral_line_update_only | default(false) | bool
-
-    - name: Configure a new release build for the code update
-      become_user: "{{ spectral_line_service_user }}"
-      command:
-        argv:
-          - meson
-          - setup
-          - "{{ spectral_line_build_dir }}"
-          - --buildtype=release
-        chdir: "{{ spectral_line_install_dir }}"
-      environment: "{{ spectral_line_build_environment }}"
-      when:
-        - spectral_line_update_only | default(false) | bool
-        - not spectral_line_update_build_config.stat.exists
-
-    - name: Reconfigure the existing release build for the code update
-      become_user: "{{ spectral_line_service_user }}"
-      command:
-        argv:
-          - meson
-          - setup
-          - --reconfigure
-          - "{{ spectral_line_build_dir }}"
-          - --buildtype=release
-        chdir: "{{ spectral_line_install_dir }}"
-      environment: "{{ spectral_line_build_environment }}"
-      when:
-        - spectral_line_update_only | default(false) | bool
-        - spectral_line_update_build_config.stat.exists
-
     - name: Check for the installed receiver service before compilation
       stat:
         path: /etc/systemd/system/spectral-line.service
       register: spectral_line_update_service_unit
       when: spectral_line_update_only | default(false) | bool
 
-    - name: Stop the receiver before compiling the updated executable
+    - name: Stop the receiver before replacing the build directory
       systemd:
         name: spectral-line.service
         state: stopped
       when:
         - spectral_line_update_only | default(false) | bool
         - spectral_line_update_service_unit.stat.exists
+
+    - name: Remove the previous build directory for the code update
+      file:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
+        state: absent
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Create an empty build directory for the code update
+      file:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
+        state: directory
+        owner: "{{ spectral_line_service_user }}"
+        group: "{{ spectral_line_service_user }}"
+        mode: "0755"
+      when: spectral_line_update_only | default(false) | bool
+
+    - name: Configure a clean release build for the code update
+      become_user: "{{ spectral_line_service_user }}"
+      command:
+        argv:
+          - meson
+          - setup
+          - "{{ spectral_line_build_dir }}"
+          - --buildtype=release
+        chdir: "{{ spectral_line_install_dir }}"
+      environment: "{{ spectral_line_build_environment }}"
+      when: spectral_line_update_only | default(false) | bool
 
     - name: Compile the updated receiver
       become_user: "{{ spectral_line_service_user }}"
@@ -269,14 +252,6 @@
     - name: Deploy this server's static config.yaml
       include_tasks: tasks/configure-subbands.yml
 
-    - name: Ensure the build directory is writable by the service account
-      file:
-        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
-        state: directory
-        owner: "{{ spectral_line_service_user }}"
-        group: "{{ spectral_line_service_user }}"
-        recurse: true
-
     - name: Verify required build commands and libraries
       become_user: "{{ spectral_line_service_user }}"
       command:
@@ -289,12 +264,20 @@
         - [pkg-config, --exists, libdpdk, spdlog, fmt, yaml-cpp]
       changed_when: false
 
-    - name: Check whether Meson is configured
-      stat:
-        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/build.ninja"
-      register: spectral_line_build_config
+    - name: Remove the previous build directory
+      file:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
+        state: absent
 
-    - name: Configure a new release build
+    - name: Create an empty build directory
+      file:
+        path: "{{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}"
+        state: directory
+        owner: "{{ spectral_line_service_user }}"
+        group: "{{ spectral_line_service_user }}"
+        mode: "0755"
+
+    - name: Configure a clean release build
       become_user: "{{ spectral_line_service_user }}"
       command:
         argv:
@@ -304,20 +287,6 @@
           - --buildtype=release
         chdir: "{{ spectral_line_install_dir }}"
       environment: "{{ spectral_line_build_environment }}"
-      when: not spectral_line_build_config.stat.exists
-
-    - name: Reconfigure an existing release build
-      become_user: "{{ spectral_line_service_user }}"
-      command:
-        argv:
-          - meson
-          - setup
-          - --reconfigure
-          - "{{ spectral_line_build_dir }}"
-          - --buildtype=release
-        chdir: "{{ spectral_line_install_dir }}"
-      environment: "{{ spectral_line_build_environment }}"
-      when: spectral_line_build_config.stat.exists
 
     - name: Compile Spectral_line
       become_user: "{{ spectral_line_service_user }}"

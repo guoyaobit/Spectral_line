@@ -96,11 +96,11 @@ ansible-playbook -i ansible/inventory.yml ansible/deploy.yml --forks 10 \
 
 Code-update mode requires `/opt/Spectral_line` to exist from an earlier full
 deployment. It preserves each server's deployed `config.yaml` and `.venv`,
-uses the existing build directory when available, runs Meson reconfiguration
-and compilation, and verifies `build/7mm`. It skips package installation,
-desktop changes, systemd unit installation, monitor changes, and summary
-collection. The receiver is stopped before its executable is rebuilt and is
-left stopped for coordinated startup with `service-control.sh`.
+stops the receiver, deletes the previous build directory, creates a clean
+Meson release build, compiles it, and verifies `build/7mm`. It skips package
+installation, desktop changes, systemd unit installation, monitor changes, and
+summary collection. The receiver is stopped before its executable is rebuilt
+and is left stopped for coordinated startup with `service-control.sh`.
 
 The deployment switches every receiver to `multi-user.target` and stops its
 display manager, so GPU and CPU resources are not consumed by a desktop
@@ -120,9 +120,12 @@ The archive is expanded into `/opt/Spectral_line` on each target, so local
 controller changes are included even when they have not been pushed to GitHub.
 
 If the services are already installed, the playbook stops them before replacing
-source files and rebuilding. It then creates `/opt/Spectral_line/.venv`, installs
-`monitor/requirements.txt`, and renders the systemd units. The monitor is
-enabled and started, while the receiver remains disabled and stopped.
+source files and rebuilding. Every full deployment and code-only update removes
+the previous `build` directory before running `meson setup`, preventing stale
+objects or cached configuration from entering the new executable. It then
+creates `/opt/Spectral_line/.venv`, installs `monitor/requirements.txt`, and
+renders the systemd units. The monitor is enabled and started, while the
+receiver remains disabled and stopped.
 
 After the build, the default executable path on every server is
 `/opt/Spectral_line/build/7mm`. `spectral-line.service` is not enabled at boot;
