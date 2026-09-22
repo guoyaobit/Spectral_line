@@ -93,7 +93,7 @@ public:
     header.total_pkt = static_cast<uint16_t>(
         (payload_len + chunk_data_size - 1) / chunk_data_size);
 
-    apply_window_jitter();
+    apply_window_jitter(header);
 
     std::vector<char> buffer(header_size + chunk_data_size);
     size_t offset = 0;
@@ -117,42 +117,30 @@ public:
       // back-to-back at line rate. This delay is local to the current window;
       // it does not use a shared limiter or cap the whole server's bandwidth.
       if (header.pkt_id + 1 < header.total_pkt)
-        std::this_thread::sleep_for(std::chrono::microseconds(20));
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
     }
 
     return true;
   }
 
 private:
-  static void apply_window_jitter() {
-    // GPU servers finish the same integration at nearly the same instant.
-    // Give every sending thread an independent delay before it queues a whole
-    // window, so windows from different subbands and servers do not arrive as
-    // one synchronized burst. After this phase offset, each window sends at
-    // the socket's original unrestricted rate.
-    constexpr uint32_t MAX_WINDOW_JITTER_US = 50000;
-    thread_local std::mt19937 generator([] {
-      std::random_device random_device;
-      const uint64_t clock_seed = static_cast<uint64_t>(
-          std::chrono::high_resolution_clock::now()
-              .time_since_epoch()
-              .count());
-      const uint64_t thread_seed = static_cast<uint64_t>(
-          std::hash<std::thread::id>{}(std::this_thread::get_id()));
-      const uint64_t process_seed = static_cast<uint64_t>(getpid());
-      std::seed_seq seeds{
-          random_device(), random_device(),
-          static_cast<uint32_t>(clock_seed),
-          static_cast<uint32_t>(clock_seed >> 32),
-          static_cast<uint32_t>(thread_seed),
-          static_cast<uint32_t>(thread_seed >> 32),
-          static_cast<uint32_t>(process_seed)};
-      return std::mt19937(seeds);
-    }());
-    thread_local std::uniform_int_distribution<uint32_t> jitter_us(
-        0, MAX_WINDOW_JITTER_US);
+  static void apply_window_jitter(const spectrum_header &header) {
+    // The 64 global subband/beam streams use 250 us slots plus a small random
+    // in-slot jitter. This avoids identical start times while keeping the
+    // complete staggering interval below 16 ms.
+    constexpr uint32_t SLOT_US = 250;
+    const uint32_t stream_id = header.subband_id * 2U + header.beam_id;
+    thread_local std::minstd_rand generator(
+        static_cast<uint32_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count()) ^
+        static_cast<uint32_t>(getpid()) ^
+        static_cast<uint32_t>(
+            std::hash<std::thread::id>{}(std::this_thread::get_id())));
+    std::uniform_int_distribution<uint32_t> jitter(0, SLOT_US - 1);
+    const uint32_t phase_us =
+        header.window_id == 0 ? stream_id * SLOT_US : 0;
     std::this_thread::sleep_for(
-        std::chrono::microseconds(jitter_us(generator)));
+        std::chrono::microseconds(phase_us + jitter(generator)));
   }
 
   int sockfd_;
