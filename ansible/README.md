@@ -185,7 +185,7 @@ order:
 | 60006/60007 | B | V/H | second start frequency |
 
 Both 100G interfaces therefore produce eight `subbands` entries per server.
-The configured `subbands[].port` values remain outgoing result ports
+The configured `subbands[].port` values remain outgoing ZeroMQ/TCP result ports
 `60000–60007`; they are not the fixed input UDP pairs in the table above.
 
 To copy only the static `config.yaml` files without rebuilding the
@@ -236,7 +236,7 @@ interface, `60000/60001` are beam A V/H, `60002/60003` are beam B V/H,
 `60004/60005` are beam A V/H for the next frequency range, and `60006/60007`
 are the matching beam B V/H. DPDK port 0 maps these pairs to subbands 0–3;
 DPDK port 1 maps them to subbands 4–7. The `subbands[].port` values
-`60000–60007` in `config.yaml` are outgoing result destination ports on
+`60000–60007` in `config.yaml` are outgoing ZeroMQ/TCP result destination ports on
 `Storage_node_ip` and are unrelated to this fixed input mapping despite using
 the same numbers.
 

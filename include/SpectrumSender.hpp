@@ -1,51 +1,41 @@
 #pragma once
-#include <arpa/inet.h>
-#include <chrono>
+
+#include <SpectrumTransport.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
-#include <functional>
-#include <iostream>
-#include <random>
+#include <limits>
+#include <stdexcept>
 #include <string>
-#include <sys/socket.h>
-#include <thread>
-#include <unistd.h>
-#include <vector>
+#include <zmq.h>
+
 #pragma pack(push, 1)
 typedef struct {
   uint32_t magic = 0x534C5231; // "SLR1"
   uint16_t version = 2;
-  // UTC integration center time
-  // Unix epoch nanoseconds
-  uint64_t timestamp_ns;
-  // observation identification
-  uint32_t obs_id;         // observation ID
-  uint32_t integration_id; // integration counter
-  // frequency information
-  uint16_t subband_id; // Subband identifier
-  uint16_t window_id;  // window id
+  uint64_t timestamp_ns; // UTC integration centre, Unix epoch nanoseconds
+  uint32_t obs_id;
+  uint32_t integration_id;
+  uint16_t subband_id;
+  uint16_t window_id;
   double subband_start_freq;
   double subband_end_freq;
   double start_freq_hz;
   double channel_bw_hz;
   uint32_t n_channels;
   uint8_t stokes;
-  // packet fragmentation
+  // A ZeroMQ message contains one complete result. These fields remain for
+  // spectrum_header v2 layout compatibility and are always 0/1.
   uint16_t pkt_id;
   uint16_t total_pkt;
-  // integration
-  float exposure; // seconds
-  // calibration
-  uint8_t noise_state; // OFF=0 ON=1 MIX=2
-  uint8_t cal_mode;    // optional
-  uint8_t beam_id = 0; // 0=A, 1=B
+  float exposure;
+  uint8_t noise_state;
+  uint8_t cal_mode;
+  uint8_t beam_id = 0;
   uint8_t reserved2 = 0;
-
-  // telescope direction
-  double ra;  // rad
-  double dec; // rad
-  // data quality
-  uint32_t flags; // overflow/dropout/etc
+  double ra;
+  double dec;
+  uint32_t flags;
 } spectrum_header;
 #pragma pack(pop)
 
@@ -54,95 +44,132 @@ static_assert(sizeof(spectrum_header) == 95,
 static_assert(offsetof(spectrum_header, beam_id) == 73,
               "spectrum_header beam_id offset must remain stable");
 
+inline void *spectrum_zmq_context() {
+  // Process-lifetime storage avoids static destruction ordering problems with
+  // SpectrumSender objects owned by GlobalConfig.
+  static void *context = [] {
+    void *ctx = zmq_ctx_new();
+    if (ctx != nullptr && zmq_ctx_set(ctx, ZMQ_IO_THREADS, 2) != 0) {
+      zmq_ctx_term(ctx);
+      ctx = nullptr;
+    }
+    return ctx;
+  }();
+  return context;
+}
+
 class SpectrumSender {
 public:
-  SpectrumSender() : sockfd_(-1) {}
-
-  SpectrumSender(const std::string &ip, uint16_t port) { init(ip, port); }
-
-  void init(const std::string &ip, uint16_t port) {
-    sockfd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd_ < 0) {
-      perror("socket creation failed");
-      throw std::runtime_error("Failed to create socket");
-    }
-    memset(&dest_addr_, 0, sizeof(dest_addr_));
-    dest_addr_.sin_family = AF_INET;
-    dest_addr_.sin_port = htons(port);
-
-    if (inet_pton(AF_INET, ip.c_str(), &dest_addr_.sin_addr) <= 0) {
-      close(sockfd_);
-      throw std::runtime_error("Invalid IP address");
-    }
-  }
+  SpectrumSender() = default;
+  SpectrumSender(const SpectrumSender &) = delete;
+  SpectrumSender &operator=(const SpectrumSender &) = delete;
 
   ~SpectrumSender() {
-    if (sockfd_ >= 0) {
-      close(sockfd_);
+    if (socket_ != nullptr)
+      zmq_close(socket_);
+  }
+
+  void init(const std::string &ip, uint16_t port, uint16_t server_id) {
+    if (socket_ != nullptr)
+      zmq_close(socket_);
+
+    void *context = spectrum_zmq_context();
+    if (context == nullptr)
+      throw std::runtime_error("Failed to create ZeroMQ context");
+
+    socket_ = zmq_socket(context, ZMQ_PUSH);
+    if (socket_ == nullptr)
+      throw std::runtime_error(zmq_strerror(zmq_errno()));
+
+    server_id_ = server_id;
+    const int one = 1;
+    const int zero = 0;
+    // Keep at most one result per logical window in ZeroMQ. This bounds stale
+    // data when the Writer stops and makes subsequent non-blocking sends drop.
+    const int send_hwm = 1;
+    const int heartbeat_ms = 1000;
+    const int heartbeat_timeout_ms = 3000;
+    if (zmq_setsockopt(socket_, ZMQ_IMMEDIATE, &one, sizeof(one)) != 0 ||
+        zmq_setsockopt(socket_, ZMQ_LINGER, &zero, sizeof(zero)) != 0 ||
+        zmq_setsockopt(socket_, ZMQ_SNDHWM, &send_hwm,
+                       sizeof(send_hwm)) != 0 ||
+        zmq_setsockopt(socket_, ZMQ_SNDTIMEO, &zero, sizeof(zero)) != 0 ||
+        zmq_setsockopt(socket_, ZMQ_HEARTBEAT_IVL, &heartbeat_ms,
+                       sizeof(heartbeat_ms)) != 0 ||
+        zmq_setsockopt(socket_, ZMQ_HEARTBEAT_TIMEOUT,
+                       &heartbeat_timeout_ms,
+                       sizeof(heartbeat_timeout_ms)) != 0) {
+      const std::string error = zmq_strerror(zmq_errno());
+      zmq_close(socket_);
+      socket_ = nullptr;
+      throw std::runtime_error("Failed to configure ZeroMQ sender: " + error);
+    }
+
+    endpoint_ = "tcp://" + ip + ":" + std::to_string(port);
+    if (zmq_connect(socket_, endpoint_.c_str()) != 0) {
+      const std::string error = zmq_strerror(zmq_errno());
+      zmq_close(socket_);
+      socket_ = nullptr;
+      throw std::runtime_error("Failed to connect ZeroMQ sender to " +
+                               endpoint_ + ": " + error);
     }
   }
+
   bool send_spectrum(spectrum_header &header, const void *payload,
                      size_t payload_len) {
-    if (sockfd_ < 0) {
-      std::cerr << "Socket is not initialized" << std::endl;
+    if (socket_ == nullptr || payload == nullptr)
       return false;
-    }
-    const char *payload_bytes = reinterpret_cast<const char *>(payload);
-    const size_t header_size = sizeof(spectrum_header);
-    const size_t chunk_data_size = 8192;
-    header.total_pkt = static_cast<uint16_t>(
-        (payload_len + chunk_data_size - 1) / chunk_data_size);
+    if (payload_len >
+        std::numeric_limits<uint32_t>::max() - sizeof(spectrum_header))
+      return false;
 
-    apply_window_jitter(header);
+    header.pkt_id = 0;
+    header.total_pkt = 1;
 
-    std::vector<char> buffer(header_size + chunk_data_size);
-    size_t offset = 0;
+    // Advance before checking writability so a mid-run disconnect remains
+    // visible as a sequence gap after the Writer reconnects. Avoid allocating,
+    // copying, and checksumming a large result when no peer can accept it.
+    const uint64_t sequence = next_sequence_++;
+    zmq_pollitem_t writable{socket_, 0, ZMQ_POLLOUT, 0};
+    const int poll_result = zmq_poll(&writable, 1, 0);
+    if (poll_result <= 0 || (writable.revents & ZMQ_POLLOUT) == 0)
+      return false;
 
-    for (header.pkt_id = 0; header.pkt_id < header.total_pkt; header.pkt_id++) {
-      size_t chunk_size = std::min(chunk_data_size, payload_len - offset);
+    const size_t body_bytes = sizeof(spectrum_header) + payload_len;
+    const size_t message_bytes = sizeof(spectrum_transport_header) + body_bytes;
+    if (message_bytes > static_cast<size_t>(std::numeric_limits<int>::max()))
+      return false;
 
-      memcpy(buffer.data(), &header, header_size);
-      memcpy(buffer.data() + header_size, payload_bytes + offset, chunk_size);
+    // Allocate the final libzmq message directly. zmq_msg_send() transfers its
+    // storage to the I/O thread, avoiding the extra copy performed by
+    // zmq_send() from an application-owned std::vector.
+    zmq_msg_t message;
+    if (zmq_msg_init_size(&message, message_bytes) != 0)
+      return false;
+    auto *message_data = static_cast<uint8_t *>(zmq_msg_data(&message));
 
-      ssize_t sent = sendto(sockfd_, buffer.data(), header_size + chunk_size, 0,
-                            reinterpret_cast<const sockaddr *>(&dest_addr_),
-                            sizeof(dest_addr_));
-      if (sent < 0) {
-        perror("sendto failed");
-        return false;
-      }
+    auto *transport = reinterpret_cast<spectrum_transport_header *>(
+        message_data);
+    *transport = spectrum_transport_header{};
+    transport->server_id = server_id_;
+    transport->sequence = sequence;
+    transport->message_bytes = static_cast<uint32_t>(body_bytes);
 
-      offset += chunk_size;
-      // Keep one completed spectrum from injecting all of its UDP fragments
-      // back-to-back at line rate. This delay is local to the current window;
-      // it does not use a shared limiter or cap the whole server's bandwidth.
-      if (header.pkt_id + 1 < header.total_pkt)
-        std::this_thread::sleep_for(std::chrono::microseconds(50));
-    }
+    uint8_t *body = message_data + sizeof(*transport);
+    std::memcpy(body, &header, sizeof(header));
+    std::memcpy(body + sizeof(header), payload, payload_len);
+    transport->crc32c = spectrum_crc32c(body, body_bytes);
 
-    return true;
+    const int sent = zmq_msg_send(&message, socket_, ZMQ_DONTWAIT);
+    const bool complete =
+        sent >= 0 && static_cast<size_t>(sent) == message_bytes;
+    zmq_msg_close(&message);
+    return complete;
   }
 
 private:
-  static void apply_window_jitter(const spectrum_header &header) {
-    // The 64 global subband/beam streams use 250 us slots plus a small random
-    // in-slot jitter. This avoids identical start times while keeping the
-    // complete staggering interval below 16 ms.
-    constexpr uint32_t SLOT_US = 250;
-    const uint32_t stream_id = header.subband_id * 2U + header.beam_id;
-    thread_local std::minstd_rand generator(
-        static_cast<uint32_t>(
-            std::chrono::steady_clock::now().time_since_epoch().count()) ^
-        static_cast<uint32_t>(getpid()) ^
-        static_cast<uint32_t>(
-            std::hash<std::thread::id>{}(std::this_thread::get_id())));
-    std::uniform_int_distribution<uint32_t> jitter(0, SLOT_US - 1);
-    const uint32_t phase_us =
-        header.window_id == 0 ? stream_id * SLOT_US : 0;
-    std::this_thread::sleep_for(
-        std::chrono::microseconds(phase_us + jitter(generator)));
-  }
-
-  int sockfd_;
-  sockaddr_in dest_addr_;
+  void *socket_ = nullptr;
+  uint16_t server_id_ = 0;
+  uint64_t next_sequence_ = 0;
+  std::string endpoint_;
 };

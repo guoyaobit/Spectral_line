@@ -30,7 +30,7 @@ Packets arriving on other UDP destination ports are dropped by the catch-all
 DPDK flow rule. Spectrum results leave through a kernel-managed SR-IOV virtual
 function (VF), selected in `Sender_Nic`. Every configured `subbands[].port`
 value (`60000–60007` in the example configuration) is the outgoing result
-destination UDP port on `Storage_node_ip`. It is independent of the fixed 100G
+destination ZeroMQ/TCP port on `Storage_node_ip`. It is independent of the fixed 100G
 input-port mapping above and is not a local source port.
 
 ## Host prerequisites
@@ -38,7 +38,8 @@ input-port mapping above and is not a local source port.
 - Linux with a C++17 compiler, Meson and Ninja.
 - NVIDIA driver and CUDA toolkit compatible with the target GPU. The supplied
   build file uses `-arch=sm_86`; change this for other GPU architectures.
-- DPDK development headers/libraries, `spdlog`, `fmt`, and `yaml-cpp`.
+- DPDK development headers/libraries, `spdlog`, `fmt`, `yaml-cpp`, and
+  `libzmq`.
 - Two receive NIC ports supported by DPDK and bound to a userspace driver such
   as `vfio-pci`; huge pages and sufficient locked memory for DPDK/CUDA pinned
   buffers.
@@ -54,7 +55,7 @@ NIC driver. Confirm them before building:
 ```sh
 nvidia-smi
 dpdk-testpmd --version
-pkg-config --modversion libdpdk spdlog fmt yaml-cpp
+pkg-config --modversion libdpdk spdlog fmt yaml-cpp libzmq
 meson --version
 ```
 
@@ -220,8 +221,12 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   receiver; the example configuration uses `ens81f0v0`. The current code uses
   this name when installing the permanent neighbour entry. Linux routing must
   also select this VF for `Storage_node_ip`.
-- `subbands[].port`: destination UDP port on `Storage_node_ip` for that
-  subband's spectrum results. It does not configure a local source port.
+- `subbands[].port`: destination ZeroMQ/TCP port on `Storage_node_ip` for that
+  subband's complete spectrum results. It does not configure a local source
+  port. Port values do not identify subbands, beams, or windows; the Writer
+  reads those identities from `spectrum_header`. Multiple subbands may share a
+  destination port. The Writer's `result_ports` list only declares the unique
+  TCP ports on which it listens, and its order has no meaning.
 - `Baseband_Folder0`/`Baseband_Folder1`: writable high-throughput filesystems
   used only in baseband mode.
 - `Baseband_bits`: `8`, `4`, or `2`. For 4-bit and 2-bit output, the program

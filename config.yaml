@@ -23,16 +23,18 @@ Baseband_Folder1: /data1
 Baseband_bits: 8
 subband_monitor: true
 subbands:
-  # Every `port` value below is the destination UDP port on Storage_node_ip
-  # used to send the processed spectrum result. It does NOT configure the
-  # fixed 100G DPDK input UDP ports, even though both ranges are 60000-60007.
+  # Every `port` value below is the destination ZeroMQ/TCP port on Storage_node_ip
+  # used to send the processed spectrum result. Values may be arbitrary TCP
+  # ports and multiple subbands may share one port. Recorder obtains subband,
+  # beam and window identities from spectrum_header, not from the port number.
+  # It does NOT configure the fixed 100G DPDK input UDP ports.
   # DPDK port 0, UDP 60000/60001: beam A, V/H.
   - gpu_id: 0
     enable: true
     beam: A # spectrum_header beam_id=0
     start_freq: 384e6
     end_freq: 640e6
-    port: 60000 # result destination UDP port
+    port: 60000 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 512e6
   # DPDK port 0, UDP 60002/60003: beam B, V/H.
@@ -41,7 +43,7 @@ subbands:
     beam: B # spectrum_header beam_id=1
     start_freq: 384e6
     end_freq: 640e6
-    port: 60001 # result destination UDP port
+    port: 60001 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 512e6
   # DPDK port 0, UDP 60004/60005: beam A, V/H.
@@ -50,7 +52,7 @@ subbands:
     beam: A # spectrum_header beam_id=0
     start_freq: 640e6
     end_freq: 896e6
-    port: 60002 # result destination UDP port
+    port: 60002 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 768e6
   # DPDK port 0, UDP 60006/60007: beam B, V/H.
@@ -59,7 +61,7 @@ subbands:
     beam: B # spectrum_header beam_id=1
     start_freq: 640e6
     end_freq: 896e6
-    port: 60003 # result destination UDP port
+    port: 60003 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 768e6
   # DPDK port 1, UDP 60000/60001: beam A, V/H.
@@ -68,7 +70,7 @@ subbands:
     beam: A # spectrum_header beam_id=0
     start_freq: 896e6
     end_freq: 1152e6
-    port: 60004 # result destination UDP port
+    port: 60004 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 1024e6
   # DPDK port 1, UDP 60002/60003: beam B, V/H.
@@ -77,7 +79,7 @@ subbands:
     beam: B # spectrum_header beam_id=1
     start_freq: 896e6
     end_freq: 1152e6
-    port: 60005 # result destination UDP port
+    port: 60005 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 1024e6
   # DPDK port 1, UDP 60004/60005: beam A, V/H.
@@ -86,7 +88,7 @@ subbands:
     beam: A # spectrum_header beam_id=0
     start_freq: 1152e6
     end_freq: 1408e6
-    port: 60006 # result destination UDP port
+    port: 60006 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 1280e6
   # DPDK port 1, UDP 60006/60007: beam B, V/H.
@@ -95,6 +97,6 @@ subbands:
     beam: B # spectrum_header beam_id=1
     start_freq: 1152e6
     end_freq: 1408e6
-    port: 60007 # result destination UDP port
+    port: 60007 # result destination ZeroMQ/TCP port
     windows:
       - center_freq: 1280e6

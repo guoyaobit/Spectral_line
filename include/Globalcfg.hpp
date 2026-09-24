@@ -397,7 +397,8 @@ public:
               sb->start_freq + w->start_idx * channel_bw_hz;
           w->BW = win_channels * channel_bw_hz;
           w->end_freq = w->start_freq + w->BW;
-          w->sender.init(Storage_node_ip, w->port);
+          w->sender.init(Storage_node_ip, w->port,
+                         static_cast<uint16_t>(ServerID));
           w->header.exposure = integration_time();
           w->header.channel_bw_hz = channel_bw_hz;
           w->header.subband_start_freq = sb->start_freq;

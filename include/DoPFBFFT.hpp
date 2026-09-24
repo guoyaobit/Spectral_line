@@ -349,13 +349,19 @@ public:
             if (!m_config->windows[i]->sender.send_spectrum(
                     m_config->windows[i]->header, &slot.data[start_idx],
                     channels * sizeof(float4))) {
-              cfg.logger_->error(
-                  "Failed to send spectrum subband {}, beam {}, window {}, "
-                  "integration {}",
-                  m_config->windows[i]->header.subband_id,
-                  m_config->windows[i]->header.beam_id,
-                  m_config->windows[i]->header.window_id,
-                  m_config->windows[i]->header.integration_id);
+              ++m_result_send_failures;
+              if ((m_result_send_failures &
+                   (m_result_send_failures - 1)) == 0) {
+                cfg.logger_->warn(
+                    "Dropped ZeroMQ spectrum result because Writer is "
+                    "unavailable or its queue is full: subband {}, beam {}, "
+                    "window {}, integration {}, total drops {}",
+                    m_config->windows[i]->header.subband_id,
+                    m_config->windows[i]->header.beam_id,
+                    m_config->windows[i]->header.window_id,
+                    m_config->windows[i]->header.integration_id,
+                    m_result_send_failures);
+              }
             }
             ++m_config->windows[i]->header.integration_id;
           }
@@ -367,13 +373,18 @@ public:
             if (!m_config->windows[0]->sender.send_spectrum(
                     m_config->windows[0]->header, &slot.sumPower,
                     sizeof(float))) {
-              cfg.logger_->error(
-                  "Failed to send continuum subband {}, beam {}, window {}, "
-                  "integration {}",
-                  m_config->windows[0]->header.subband_id,
-                  m_config->windows[0]->header.beam_id,
-                  m_config->windows[0]->header.window_id,
-                  m_config->windows[0]->header.integration_id);
+              ++m_result_send_failures;
+              if ((m_result_send_failures &
+                   (m_result_send_failures - 1)) == 0) {
+                cfg.logger_->warn(
+                    "Dropped ZeroMQ continuum result because Writer is "
+                    "unavailable or its queue is full: subband {}, beam {}, "
+                    "integration {}, total drops {}",
+                    m_config->windows[0]->header.subband_id,
+                    m_config->windows[0]->header.beam_id,
+                    m_config->windows[0]->header.integration_id,
+                    m_result_send_failures);
+              }
             }
             ++m_config->windows[0]->header.integration_id;
       }
@@ -776,4 +787,5 @@ private:
   bool m_current_pfb_output_valid = false;
   bool m_accumulators_reset_for_gap = false;
   uint64_t m_invalid_input_blocks = 0;
+  uint64_t m_result_send_failures = 0;
 };

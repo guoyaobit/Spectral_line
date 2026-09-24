@@ -56,10 +56,10 @@ address is read separately from the deployed `config.yaml`.
 
 ## Subband configuration
 
-`Destination UDP port` is the configured result destination on
+`Destination ZeroMQ/TCP port` is the configured result destination on
 `Storage_node_ip`; it is not the fixed 100G input port.
 
-| Server | 100G port | Input UDP pair | Subband | Beam | Enabled | Start frequency (MHz) | End frequency (MHz) | Destination UDP port |
+| Server | 100G port | Input UDP pair | Subband | Beam | Enabled | Start frequency (MHz) | End frequency (MHz) | Destination ZeroMQ/TCP port |
 |---|---:|:---:|---:|:---:|:---:|---:|---:|---:|
 {% for host in groups['spectral_line_servers'] | default([]) -%}
 {% set host_data = hostvars[host] -%}

@@ -79,6 +79,14 @@
           - ./config.yaml
       when: spectral_line_update_only | default(false) | bool
 
+    - name: Install ZeroMQ development files for the code update
+      apt:
+        name: libzmq3-dev
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+      when: spectral_line_update_only | default(false) | bool
+
     - name: Verify build tools and libraries for the code update
       become_user: "{{ spectral_line_service_user }}"
       command:
@@ -88,7 +96,7 @@
         - [meson, --version]
         - [ninja, --version]
         - [nvcc, --version]
-        - [pkg-config, --exists, libdpdk, spdlog, fmt, yaml-cpp]
+        - [pkg-config, --exists, libdpdk, spdlog, fmt, yaml-cpp, libzmq]
       changed_when: false
       when: spectral_line_update_only | default(false) | bool
 
@@ -186,6 +194,7 @@
           - libpcap-dev
           - libspdlog-dev
           - libyaml-cpp-dev
+          - libzmq3-dev
           - meson
           - ninja-build
           - pkg-config
@@ -253,7 +262,7 @@
         - [meson, --version]
         - [ninja, --version]
         - [nvcc, --version]
-        - [pkg-config, --exists, libdpdk, spdlog, fmt, yaml-cpp]
+        - [pkg-config, --exists, libdpdk, spdlog, fmt, yaml-cpp, libzmq]
       changed_when: false
 
     - name: Remove the previous build directory

@@ -22,7 +22,7 @@ Baseband_Folder1: /data1
 Baseband_bits: 8
 subband_monitor: true
 subbands:
-  # port is the outgoing result destination port, not the 100G input port.
+  # port is the outgoing ZeroMQ/TCP result port, not the 100G input UDP port.
   # DPDK port 0 (ETH0, 10.17.16.23), input UDP 60000/60001: beam A, V/H.
   - gpu_id: 0
     enable: true

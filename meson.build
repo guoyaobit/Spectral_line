@@ -17,6 +17,7 @@ cuda_dep = dependency('cuda', required: true)
 spdlog_dep = dependency('spdlog', required: true)
 yaml_dep = dependency('yaml-cpp', required: true)
 fmt_dep = dependency('fmt', required: true)
+zmq_dep = dependency('libzmq', required: true)
 
 cuda = meson.get_compiler('cuda')
 
@@ -36,7 +37,7 @@ dpdk_lib = static_library(
     'dpdk',
     'src/dpdk.cpp',
     include_directories: inc,
-    dependencies: dpdk_dep,
+    dependencies: [dpdk_dep, zmq_dep],
 )
 
 executable(
@@ -53,6 +54,7 @@ executable(
         yaml_dep,
         spdlog_dep,
         fmt_dep,
+        zmq_dep,
     ],
     link_with: dpdk_lib,
 )

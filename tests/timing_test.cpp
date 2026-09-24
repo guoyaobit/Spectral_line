@@ -1,5 +1,6 @@
 #include "timing.hpp"
 #include "vdif.hpp"
+#include "SpectrumTransport.hpp"
 
 int main()
 {
@@ -63,6 +64,10 @@ int main()
         header.getBitsPerSample() != 8U ||
         header.getThreadID() != 17U)
         return 11;
+
+    static constexpr char crc_input[] = "123456789";
+    if (spectrum_crc32c(crc_input, sizeof(crc_input) - 1) != 0xe3069283U)
+        return 12;
 
     return 0;
 }
