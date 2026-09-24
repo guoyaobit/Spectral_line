@@ -11,6 +11,7 @@
 #include <cmath>
 #include <thread>
 #include <Globalcfg.hpp>
+#include <timing.hpp>
 #include <cuda_fp16.h>
 #include <string>
 
@@ -328,12 +329,22 @@ public:
           }
         }
 
-        uint64_t fft_period_ns = static_cast<uint64_t>(cfg.fft_period() * 1e9);
+        const uint64_t fft_period_ns = static_cast<uint64_t>(
+            std::llround(cfg.fft_period() * 1e9));
+        const uint64_t pfb_delay_ns = pfb_group_delay_ns(
+            m_num_taps, m_Nfft, cfg.sampling_rate);
+        const uint64_t integration_center_ns =
+            slot.first_timestamp_ns +
+            (slot.last_timestamp_ns - slot.first_timestamp_ns +
+             fft_period_ns) / 2;
+        const uint64_t compensated_center_ns =
+            compensate_delay_ns(integration_center_ns, pfb_delay_ns);
         if(cfg.observation_mode == ObservationMode::SPECTRAL) {
           for (size_t i = 0; i < m_config->windows.size(); i++) {
             size_t start_idx = m_config->windows[i]->start_idx;
             // Use the midpoint of the accumulated FFT intervals.
-            m_config->windows[i]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
+            m_config->windows[i]->header.timestamp_ns =
+                compensated_center_ns;
             m_config->windows[i]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
             if (!m_config->windows[i]->sender.send_spectrum(
                     m_config->windows[i]->header, &slot.data[start_idx],
@@ -350,7 +361,8 @@ public:
           }
       }
       if( cfg.observation_mode == ObservationMode::CONTINUUM) {
-            m_config->windows[0]->header.timestamp_ns = slot.first_timestamp_ns+(slot.last_timestamp_ns + fft_period_ns-slot.first_timestamp_ns)/2;
+            m_config->windows[0]->header.timestamp_ns =
+                compensated_center_ns;
             m_config->windows[0]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
             if (!m_config->windows[0]->sender.send_spectrum(
                     m_config->windows[0]->header, &slot.sumPower,

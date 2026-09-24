@@ -36,7 +36,7 @@ static constexpr uint64_t vdif_epoch_unix_sec[64] =
     1183248000ULL,  // 15: 2007-07-01
 
     1199145600ULL,  // 16: 2008-01-01
-    1214866800ULL,  // 17: 2008-07-01
+    1214870400ULL,  // 17: 2008-07-01
     1230768000ULL,  // 18: 2009-01-01
     1246406400ULL,  // 19: 2009-07-01
 
@@ -96,6 +96,20 @@ static constexpr uint64_t vdif_epoch_unix_sec[64] =
     1940630400ULL   // 63: 2031-07-01
 };
 
+/*
+ * POSIX timestamps of the UTC midnight immediately after each positive leap
+ * second since VDIF epoch 0. VDIF elapsed seconds include leap seconds,
+ * whereas Unix/POSIX time does not. IERS Bulletin C 71 confirms that no
+ * additional leap second had been introduced through 2026-06-30.
+ */
+static constexpr uint64_t utc_positive_leap_effective_unix_sec[] =
+{
+    1136073600ULL, // 2006-01-01 (leap second on 2005-12-31)
+    1230768000ULL, // 2009-01-01 (leap second on 2008-12-31)
+    1341100800ULL, // 2012-07-01 (leap second on 2012-06-30)
+    1435708800ULL, // 2015-07-01 (leap second on 2015-06-30)
+    1483228800ULL  // 2017-01-01 (leap second on 2016-12-31)
+};
 
 inline uint64_t vdif_epoch_to_unix_sec(uint8_t epoch)
 {
@@ -111,9 +125,32 @@ inline uint64_t vdif_to_timestamp_ns(
 {
     constexpr uint64_t NS_PER_SEC = 1000000000ULL;
     constexpr uint64_t FRAME_NS = 16000ULL; // 62500 frame/s
-    uint64_t sec =
-        vdif_epoch_to_unix_sec(epoch)
-        + seconds;
+    const uint64_t epoch_sec = vdif_epoch_to_unix_sec(epoch);
+    uint64_t elapsed_leap_seconds = 0;
+
+    for (const uint64_t leap_effective_sec :
+         utc_positive_leap_effective_unix_sec)
+    {
+        if (leap_effective_sec <= epoch_sec)
+            continue;
+
+        const uint64_t leap_second_vdif_value =
+            leap_effective_sec - epoch_sec + elapsed_leap_seconds;
+        if (seconds < leap_second_vdif_value)
+            break;
+
+        if (seconds == leap_second_vdif_value)
+        {
+            // POSIX has no representation for 23:59:60. Fold it onto the
+            // preceding POSIX second while preserving the VDIF frame phase.
+            return (leap_effective_sec - 1) * NS_PER_SEC +
+                   uint64_t(frame) * FRAME_NS;
+        }
+
+        ++elapsed_leap_seconds;
+    }
+
+    const uint64_t sec = epoch_sec + seconds - elapsed_leap_seconds;
     return sec * NS_PER_SEC
            + uint64_t(frame) * FRAME_NS;
 }

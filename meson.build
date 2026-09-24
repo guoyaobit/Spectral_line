@@ -56,3 +56,10 @@ executable(
     ],
     link_with: dpdk_lib,
 )
+
+timing_test = executable(
+    'timing_test',
+    'tests/timing_test.cpp',
+    include_directories: inc,
+)
+test('timing', timing_test)
