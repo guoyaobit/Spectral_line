@@ -28,10 +28,11 @@ carries Y polarisation.
 
 Packets arriving on other UDP destination ports are dropped by the catch-all
 DPDK flow rule. Spectrum results leave through a kernel-managed SR-IOV virtual
-function (VF), selected in `Sender_Nic`. Every configured `subbands[].port`
-value (`60000–60007` in the example configuration) is the outgoing result
-destination ZeroMQ/TCP port on `Storage_node_ip`. It is independent of the fixed 100G
-input-port mapping above and is not a local source port.
+function (VF) selected by the Linux routing table. Every configured
+`subbands[].port` value (`60000–60007` in the example configuration) is the
+outgoing result destination ZeroMQ/TCP port on `Storage_node_ip`. It is
+independent of the fixed 100G input-port mapping above and is not a local
+source port. The sender does not install a static ARP entry.
 
 ## Host prerequisites
 
@@ -65,8 +66,8 @@ meson --version
 2. Record the NIC's PCI addresses and current driver using
    `dpdk-devbind.py --status`.
 3. Bind only the dedicated receive NIC ports to `vfio-pci`. Do not bind the
-   SR-IOV VF named by `Sender_Nic`, or the NIC carrying the SSH session, to
-   DPDK.
+   kernel-managed result-transmission VF, or the NIC carrying the SSH session,
+   to DPDK.
 4. Give the service account access to `/dev/vfio/*`, huge pages, and enough
    `memlock` allowance; alternatively run under a controlled service with the
    required capabilities.
@@ -216,11 +217,10 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   calculates the global `spectrum_header.subband_id` as
   `ServerID * 4 + local_config_index / 2`, producing IDs 0 through 31 across
   GPU0 through GPU7; `beam_id` keeps A and B distinct.
-- `Storage_node_ip` and `Storage_node_mac`: address of the result receiver.
-- `Sender_Nic`: name of the kernel-managed SR-IOV VF used to reach the result
-  receiver; the example configuration uses `ens81f0v0`. The current code uses
-  this name when installing the permanent neighbour entry. Linux routing must
-  also select this VF for `Storage_node_ip`.
+- `Storage_node_ip`: address of the result receiver. Linux routing selects the
+  output interface and performs normal ARP/neighbor discovery.
+- `Storage_node_mac` and `Sender_Nic`: optional deployment-summary metadata;
+  the ZeroMQ sender does not read them or install a permanent neighbor entry.
 - `subbands[].port`: destination ZeroMQ/TCP port on `Storage_node_ip` for that
   subband's complete spectrum results. It does not configure a local source
   port. Port values do not identify subbands, beams, or windows; the Writer

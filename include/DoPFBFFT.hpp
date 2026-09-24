@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <cuda_runtime.h>
@@ -289,26 +290,52 @@ public:
     std::thread pushresult([this]() { send_data(); });
     pushresult.detach();;
   }
-  // Avoid lose arp while start dpdk
-  bool set_static_arp(const std::string &ip, const std::string &mac, const std::string &dev) {
-    std::string cmd = "ip neigh replace " + ip + " lladdr " + mac + " dev " + dev + " nud permanent";
-
-    int ret = system(cmd.c_str());
-
-    return (ret == 0);
-  }
   void send_data() {
     int idx = 0;
 
     auto &cfg = GlobalConfig::getInstance();
     int channels = cfg.win_channels;
-    if (set_static_arp(cfg.Storage_node_ip, cfg.Storage_node_mac, cfg.Sender_Nic)) {
-      cfg.logger_->info("Static ARP set success\n");
-    } else {
-      cfg.logger_->error("Static ARP set failed\n");
+
+    // ZeroMQ sockets are thread-affine. Create and connect every window's
+    // PUSH socket on the same GPU worker thread that performs later sends.
+    // TCP neighbour discovery is left entirely to the Linux network stack.
+    for (auto *window : m_config->windows) {
+      if (!window->sender.prepare()) {
+        cfg.logger_->error(
+            "Failed to initialize ZeroMQ sender {}: {}",
+            window->sender.endpoint(), window->sender.last_failure());
+      }
     }
 
+    // zmq_connect() is asynchronous. All sockets above start connecting in
+    // parallel; then this worker spends at most one shared 100 ms grace
+    // period waiting for them. If Writer is offline, processing still starts
+    // after the deadline and ZeroMQ continues reconnecting in the background.
+    const auto connection_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    for (auto *window : m_config->windows) {
+      const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+          connection_deadline - std::chrono::steady_clock::now());
+      const long wait_ms =
+          static_cast<long>(std::max<int64_t>(0, remaining.count()));
+      window->sender.wait_until_writable(wait_ms);
+    }
+
+    const auto log_connection_events = [&cfg, this]() {
+      for (auto *window : m_config->windows) {
+        for (const auto event : window->sender.take_connection_events()) {
+          if (event == SpectrumSender::ConnectionEvent::CONNECTED)
+            cfg.logger_->info("ZeroMQ connected: {}",
+                              window->sender.endpoint());
+          else
+            cfg.logger_->warn("ZeroMQ disconnected: {}",
+                              window->sender.endpoint());
+        }
+      }
+    };
+
     while (1) {
+      log_connection_events();
       auto &slot = m_hring[idx];
 
       if (slot.used.load(std::memory_order_acquire) && cudaEventQuery(slot.event) == cudaSuccess) {
@@ -350,18 +377,6 @@ public:
                     m_config->windows[i]->header, &slot.data[start_idx],
                     channels * sizeof(float4))) {
               ++m_result_send_failures;
-              if ((m_result_send_failures &
-                   (m_result_send_failures - 1)) == 0) {
-                cfg.logger_->warn(
-                    "Dropped ZeroMQ spectrum result because Writer is "
-                    "unavailable or its queue is full: subband {}, beam {}, "
-                    "window {}, integration {}, total drops {}",
-                    m_config->windows[i]->header.subband_id,
-                    m_config->windows[i]->header.beam_id,
-                    m_config->windows[i]->header.window_id,
-                    m_config->windows[i]->header.integration_id,
-                    m_result_send_failures);
-              }
             }
             ++m_config->windows[i]->header.integration_id;
           }
@@ -374,17 +389,6 @@ public:
                     m_config->windows[0]->header, &slot.sumPower,
                     sizeof(float))) {
               ++m_result_send_failures;
-              if ((m_result_send_failures &
-                   (m_result_send_failures - 1)) == 0) {
-                cfg.logger_->warn(
-                    "Dropped ZeroMQ continuum result because Writer is "
-                    "unavailable or its queue is full: subband {}, beam {}, "
-                    "integration {}, total drops {}",
-                    m_config->windows[0]->header.subband_id,
-                    m_config->windows[0]->header.beam_id,
-                    m_config->windows[0]->header.integration_id,
-                    m_result_send_failures);
-              }
             }
             ++m_config->windows[0]->header.integration_id;
       }

@@ -11,7 +11,10 @@ noise_source:
 integration_t: 1 # Intergration time s
 win_bw: 256e6 # window bandwidth Hz; e.g. 1e6,2e6,4e6,32e6,64e6,256e6
 win_channels: 65536 # window channels  32768,65536
-# Spectrum result destination. Sender_Nic is a kernel-managed SR-IOV VF.
+# Spectrum result destination. Linux routing selects the kernel-managed output
+# interface and performs normal neighbour discovery; the program does not set
+# a static ARP entry. The MAC and NIC fields below are optional deployment
+# metadata and are not used by the ZeroMQ sender.
 Storage_node_ip: 192.168.101.11
 Storage_node_mac: 0c:42:a1:78:8f:bc
 Sender_Nic: ens81f0v0

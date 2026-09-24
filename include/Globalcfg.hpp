@@ -124,7 +124,7 @@ public:
   uint8_t max_streams = 16;        // Maximum number of receive streams
   uint8_t enabled_streams = 0;     // Number of enabled receive streams
   const int sampling_rate = 256e6; // samaping rate
-  std::string Storage_node_ip, Storage_node_mac, Sender_Nic;
+  std::string Storage_node_ip;
   const int precision = 1 + 1;  // real 8bit ,image 8bit
   const int packet_size = 8192; // Payload bytes per packet
   int total_nfft = 65536;       // must be multipied by 4096
@@ -208,16 +208,6 @@ public:
         Storage_node_ip = config["Storage_node_ip"].as<std::string>();
       } else {
         Storage_node_ip = "127.0.0.1"; // Default value
-      }
-      if (config["Storage_node_mac"] && config["Storage_node_mac"].IsScalar()) {
-        Storage_node_mac = config["Storage_node_mac"].as<std::string>();
-      } else {
-        throw std::runtime_error("Configuration is missing Storage_node_mac");
-      }
-      if (config["Sender_Nic"] && config["Sender_Nic"].IsScalar()) {
-        Sender_Nic = config["Sender_Nic"].as<std::string>();
-      } else {
-        throw std::runtime_error("Configuration is missing Sender_Nic");
       }
       if (observation_mode == ObservationMode::BASEBAND) {
         if (config["Baseband_Folder0"] &&
