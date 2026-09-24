@@ -482,23 +482,32 @@ public:
 
     m_queueA->wait_dequeue(readblockA);
     m_queueB->wait_dequeue(readblockB);
+    bool alignment_gap = false;
+    while (readblockA->batch_id != readblockB->batch_id) {
+      alignment_gap = true;
+      if (readblockA->batch_id < readblockB->batch_id)
+        m_queueA->wait_dequeue(readblockA);
+      else
+        m_queueB->wait_dequeue(readblockB);
+    }
     if (m_queueA->size_approx() > cfg.QUEUE_CAPACITY * 0.95) cfg.logger_->debug("Buffed {} batch in queue,more than 95%%", m_queueA->size_approx());
-    size_t m_pktidA = readblockA->pkt_id[0];
-    size_t m_pktidB = readblockB->pkt_id[0];
-    if (cfg.Debug_mode) {
-      if (m_pktidA != m_pktidB) cfg.logger_->warn("Subband {} pktid A != B. {} !={} ", m_subband_id, m_pktidA, m_pktidB);
-    }
-    for (int i = 0; i < cfg.batchsize(); i++) {
-      if (readblockA->pkt_id[i] != m_pktidA + i) {
-        readblockA->valid = false;
-      }
-      if (readblockB->pkt_id[i] != m_pktidB + i) {
-        readblockB->valid = false;
-      }
-    }
-    if (readblockA->valid == false or readblockB->valid == false) {
+    const bool input_valid =
+        !alignment_gap &&
+        readblockA->valid && readblockB->valid;
+    if (!input_valid) {
       memset(readblockA->buffer, 0, m_Nfft * 2);
       memset(readblockB->buffer, 0, m_Nfft * 2);
+      ++m_invalid_input_blocks;
+      if ((m_invalid_input_blocks & (m_invalid_input_blocks - 1)) == 0) {
+        cfg.logger_->warn(
+            "Subband {} invalid FFT input block {}: batch A {} ({}/{}), "
+            "batch B {} ({}/{}), alignment gap {}",
+            m_subband_id, m_invalid_input_blocks,
+            readblockA->batch_id, readblockA->received_count,
+            readblockA->count, readblockB->batch_id,
+            readblockB->received_count, readblockB->count,
+            alignment_gap);
+      }
     }
     m_timestamp_ns = vdif_to_timestamp_ns(
         readblockA->hdrs[0].getReferenceEpoch(),
@@ -510,6 +519,12 @@ public:
         static_cast<NoiseState>(readblockA->noise_state[0]);
         update_noise_state(new_state);
     }
+
+    if (!input_valid)
+      m_pfb_invalid_blocks_remaining = m_num_taps;
+    m_current_pfb_output_valid = m_pfb_invalid_blocks_remaining == 0;
+    if (m_pfb_invalid_blocks_remaining != 0)
+      --m_pfb_invalid_blocks_remaining;
 
     CUDA_CHECK(cudaMemcpyAsync(m_rawA, readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA));
     CUDA_CHECK(cudaEventRecord(evtH2DA_done, sH2DA));
@@ -554,6 +569,27 @@ public:
 
     cudaStreamWaitEvent(sD2H, evtPFBA_done, 0);
     cudaStreamWaitEvent(sD2H, evtPFBB_done, 0);
+    if (!m_current_pfb_output_valid) {
+      if (!m_accumulators_reset_for_gap) {
+        if (cfg.observation_mode == ObservationMode::SPECTRAL) {
+          cudaMemsetAsync(m_acc_stokes_ON, 0,
+                          m_Nfft * sizeof(float4), sD2H);
+          cudaMemsetAsync(m_acc_stokes_OFF, 0,
+                          m_Nfft * sizeof(float4), sD2H);
+        } else {
+          cudaMemsetAsync(d_sumPower_ON, 0, sizeof(float), sD2H);
+          cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(float), sD2H);
+        }
+        m_acc_id = 0;
+        m_acc_on_id = 0;
+        m_acc_off_id = 0;
+        m_acc_on_first_timestamp_ns = 0;
+        m_acc_off_first_timestamp_ns = 0;
+        m_accumulators_reset_for_gap = true;
+      }
+      return;
+    }
+    m_accumulators_reset_for_gap = false;
     if (cfg.cal_mode) {
       if( is_noise_blank(m_timestamp_ns)) return;
       /*
@@ -736,4 +772,8 @@ private:
   uint32_t m_acc_off_id = 0;
   uint64_t m_acc_on_first_timestamp_ns = 0;
   uint64_t m_acc_off_first_timestamp_ns = 0;
+  size_t m_pfb_invalid_blocks_remaining = m_num_taps - 1;
+  bool m_current_pfb_output_valid = false;
+  bool m_accumulators_reset_for_gap = false;
+  uint64_t m_invalid_input_blocks = 0;
 };

@@ -32,9 +32,12 @@ struct Packet {
 };
 struct PacketBatch {
   int count;
-  std::vector<uint> pkt_id;
+  uint64_t batch_id = 0;          // packet_id / count
+  uint32_t received_count = 0;    // unique packets actually received
+  bool header_valid = false;      // hdrs[0] contains batch start time
+  std::vector<uint64_t> pkt_id;
   std::vector<uint8_t> noise_state;
-  bool valid = true;
+  bool valid = false;
   Packet *buffer; // Contiguous packet buffer
   std::vector<VDIF> hdrs;
   std::vector<Packet *> pkts; // Packets for one FFT interval

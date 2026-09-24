@@ -1,8 +1,6 @@
-#include <arpa/inet.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <unistd.h>
 
 #include <Globalcfg.hpp>
 #include <algorithm>
@@ -13,6 +11,7 @@
 #include <iostream>
 #include <rte_common.h>
 #include <rte_eal.h>
+#include <rte_ether.h>
 #include <rte_ethdev.h>
 #include <rte_ip.h>
 #include <rte_lcore.h>
@@ -21,7 +20,6 @@
 #include <sched.h>
 #include <sstream>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <vdif.hpp>
@@ -33,6 +31,17 @@
 
 auto &cfg = GlobalConfig::getInstance();
 constexpr size_t EXPECTED_PKT_LEN = 8266;
+constexpr size_t ETHER_HEADER_LEN = sizeof(rte_ether_hdr);
+constexpr size_t IPV4_HEADER_LEN = sizeof(rte_ipv4_hdr);
+constexpr size_t UDP_HEADER_OFFSET = ETHER_HEADER_LEN + IPV4_HEADER_LEN;
+constexpr size_t VDIF_HEADER_OFFSET = UDP_HEADER_OFFSET + sizeof(rte_udp_hdr);
+constexpr size_t VDIF_HEADER_LEN = VDIF::HEADER_SIZE;
+constexpr size_t VDIF_PAYLOAD_LEN = 8192;
+static_assert(VDIF_HEADER_OFFSET == 42,
+              "The FPGA packet layout requires Ethernet/IPv4/UDP headers");
+static_assert(EXPECTED_PKT_LEN ==
+                  VDIF_HEADER_OFFSET + VDIF_HEADER_LEN + VDIF_PAYLOAD_LEN,
+              "FPGA packet length and fixed offsets must agree");
 struct lcore_param {
   uint16_t port_id;
   uint16_t queue_id;
@@ -132,6 +141,22 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool,
   port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
   port_conf.rxmode.mtu = 9000;
 
+  // MLX5 requires flow isolation to be enabled before device configure. The
+  // actual queue rules are still created after rte_eth_dev_start(), as
+  // required by the deployed driver. Isolation prevents packets received in
+  // that short interval from falling through to the default queue 0.
+  struct rte_flow_error isolate_error{};
+  const bool flow_isolated =
+      rte_flow_isolate(port, 1, &isolate_error) == 0;
+  if (flow_isolated) {
+    cfg.logger_->info("Flow isolation enabled on port {}", port);
+  } else {
+    cfg.logger_->warn(
+        "Flow isolation is unavailable on port {}: {}; UDP destination "
+        "validation will protect receive queues",
+        port, isolate_error.message ? isolate_error.message : "(no message)");
+  }
+
   retval = rte_eth_dev_configure(port, nb_rx_queues, 1, &port_conf);
   if (retval < 0)
     return retval;
@@ -149,10 +174,12 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool,
   retval = rte_eth_dev_start(port);
   if (retval < 0)
     return retval;
-  for (int i = 0; i < nb_rx_queues; i++) {
-    create_udp_dst_flow(port, 60000 + i, i);
+  for (uint16_t i = 0; i < nb_rx_queues; i++) {
+    if (create_udp_dst_flow(port, 60000 + i, i) == nullptr)
+      return -1;
   }
-  create_catch_all_drop(port);
+  if (!flow_isolated && create_catch_all_drop(port) == nullptr)
+    return -1;
 
   return 0;
 }
@@ -186,6 +213,12 @@ static int recv2mem(void *args) {
   const int stream_id = param->ring_id;
   const uint16_t port = param->port_id;
   const uint16_t queue_id = param->queue_id;
+  const rte_be16_t expected_udp_dst_port =
+      rte_cpu_to_be_16(param->dest_port);
+  const bool baseband_mode =
+      cfg.observation_mode == ObservationMode::BASEBAND;
+  const bool cal_mode = cfg.cal_mode;
+  const bool monitor_enabled = cfg.subband_monitor;
   auto &stream_cfg = cfg.streams[stream_id];
   auto &queue = stream_cfg.queue;
   auto &pool = stream_cfg.pool;
@@ -207,7 +240,46 @@ static int recv2mem(void *args) {
   uint64_t expected_pkt_id = 0;
   uint64_t total_lostnmber = 0;
   uint64_t total_pkts = 0;
+  uint64_t loss_events = 0;
+  uint64_t late_or_duplicate_packets = 0;
+  uint64_t misdirected_packets = 0;
+  uint64_t queue_full_events = 0;
   const uint32_t batchsize = pool[0]->count;
+  VDIF last_header_template;
+  bool have_header_template = false;
+  uint8_t last_noise_source_state = 0;
+
+  const auto prepare_batch = [&](PacketBatch *batch, uint64_t batch_id) {
+    batch->batch_id = batch_id;
+    batch->received_count = 0;
+    batch->valid = false;
+    batch->header_valid = have_header_template;
+    if (have_header_template) {
+      batch->hdrs[0] = last_header_template;
+      batch->hdrs[0].setPacketId(batch_id * batchsize);
+      batch->noise_state[0] = last_noise_source_state;
+    }
+  };
+
+  const auto finalize_batch = [&](PacketBatch *batch) {
+    batch->valid = batch->header_valid &&
+                   batch->received_count == batchsize;
+    if (!baseband_mode || batch->valid || !batch->header_valid)
+      return;
+
+    // Baseband files keep a fixed frame cadence. Fill only missing frames
+    // with zero payload and synthesize their VDIF times from the batch start.
+    const uint64_t batch_start_id = batch->batch_id * batchsize;
+    for (uint32_t i = 0; i < batchsize; ++i) {
+      const uint64_t expected_id = batch_start_id + i;
+      if (batch->pkt_id[i] == expected_id)
+        continue;
+      std::memset(batch->buffer[i].payload, 0, VDIF_PAYLOAD_LEN);
+      batch->hdrs[i] = batch->hdrs[0];
+      batch->hdrs[i].setPacketId(expected_id);
+    }
+  };
+
   std::string monitor_data_path = "/dev/shm/server_" +
                                   std::to_string(cfg.ServerID) + "_stream_" +
                                   std::to_string(stream_id) + ".bin";
@@ -248,41 +320,34 @@ static int recv2mem(void *args) {
         rte_prefetch0(rte_pktmbuf_mtod(bufs[i + 4], void *));
       }
 
-      total_pkts++;
-
-      /*
-       * =====================================================
-       * VDIF header
-       * =====================================================
-       */
-      VDIF header;
-
       uint8_t *data = rte_pktmbuf_mtod(mbuf, uint8_t *);
-
-      // Ethernet 14 + IPv4 20 + UDP 8 = 42
-      uint8_t *vdif_ptr = data + 42;
-      rte_memcpy(header.headerPtr(), vdif_ptr, 32);
-
-      /*
-       * Update the VDIF header for baseband output.
-       */
-      if (cfg.observation_mode == ObservationMode::BASEBAND) {
-        header.setEDV(1);
-        header.setFrameLength(8192 * 8 / cfg.Baseband_bits);
-        header.setComplex(true);
-        header.setBitsPerSample(cfg.Baseband_bits);
-        header.setLog2Channels(0);
-        header.setVDIFVersion(1);
-        header.setThreadID(cfg.ServerID * 16 + stream_id);
+      const auto *udp = reinterpret_cast<const rte_udp_hdr *>(
+          data + UDP_HEADER_OFFSET);
+      if (unlikely(udp->dst_port != expected_udp_dst_port)) {
+        ++misdirected_packets;
+        if (misdirected_packets == 1 ||
+            misdirected_packets % 65536ULL == 0) {
+          cfg.logger_->warn(
+              "Stream {} discarded {} packet(s) for UDP port {}; expected "
+              "port {}",
+              stream_id, misdirected_packets,
+              rte_be_to_cpu_16(udp->dst_port),
+              param->dest_port);
+        }
+        free_bufs[nb_free++] = mbuf;
+        continue;
       }
+
+      ++total_pkts;
+
+      const uint8_t *vdif_ptr = data + VDIF_HEADER_OFFSET;
       /*
        * =====================================================
        * VDIF metadata
        * =====================================================
        */
-      const uint64_t m_seconds = header.getSecondsFromEpoch();
-      const uint64_t m_frame_number = header.getFrameNumber();
-      const uint32_t m_NoiseSourceState = header.getNoiseSourceState();
+      const VDIF::Metadata metadata =
+          VDIF::readMetadata(vdif_ptr, cal_mode);
 
       /*
        * =====================================================
@@ -295,8 +360,10 @@ static int recv2mem(void *args) {
        * =====================================================
        */
       const bool scheduled_monitor_frame =
-          m_seconds % 2 == 0 && m_frame_number == 0;
-      if (unlikely(cfg.subband_monitor &&
+          monitor_enabled &&
+          (metadata.seconds_from_epoch & 1U) == 0 &&
+          metadata.frame_number == 0;
+      if (unlikely(monitor_enabled &&
                    (!monitor_file_initialized || scheduled_monitor_frame))) {
         if (!monitor_file_initialized) {
           monitor_fd =
@@ -336,7 +403,7 @@ static int recv2mem(void *args) {
        * packet ID
        * =====================================================
        */
-      const uint64_t recv_packet_id = m_seconds * 62500ULL + m_frame_number;
+      const uint64_t recv_packet_id = metadata.packet_id();
 
       /*
        * =====================================================
@@ -352,8 +419,8 @@ static int recv2mem(void *args) {
        * packet sequence check
        * =====================================================
        *
-       * A zero expected ID accepts the first complete batch. A mismatch after
-       * initialization is counted as packet loss.
+       * A zero expected ID accepts the first complete batch. Forward gaps are
+       * loss; IDs behind the expected value are discarded as late/duplicate.
        */
       if (expected_pkt_id == 0) {
         if (unlikely(pkt_idx_inbatch != 0)) {
@@ -363,44 +430,44 @@ static int recv2mem(void *args) {
         expected_pkt_id = recv_packet_id;
         cfg.logger_->info("First packet_id is {} ,on stream {}, seconds is {}, "
                           "framenumber is {}",
-                          expected_pkt_id, stream_id, m_seconds,
-                          m_frame_number);
+                          expected_pkt_id, stream_id,
+                          metadata.seconds_from_epoch,
+                          metadata.frame_number);
 
         expected_pkt_id++;
         prebatchid = batchid;
+        prepare_batch(pool[pool_idx], batchid);
       } else {
-        if (unlikely(expected_pkt_id != recv_packet_id)) {
-          const int64_t lostnmber =
-              static_cast<int64_t>(recv_packet_id - expected_pkt_id);
-
+        if (unlikely(recv_packet_id > expected_pkt_id)) {
+          const uint64_t lostnmber = recv_packet_id - expected_pkt_id;
           total_lostnmber += lostnmber;
+          ++loss_events;
 
-          cfg.logger_->warn("Stream {}:total_lostnmber {}, "
-                            "m_seconds {}, m_frame_number {}, "
-                            "recv_packet_id:{} , "
-                            "expected_pkt_id: {} ,lost {} packets",
-                            stream_id, total_lostnmber, m_seconds,
-                            m_frame_number, recv_packet_id, expected_pkt_id,
-                            lostnmber);
+          // Logging every gap can itself stall a receive lcore. Report only
+          // exponentially spaced events while keeping exact counters.
+          if ((loss_events & (loss_events - 1)) == 0) {
+            cfg.logger_->warn(
+                "Stream {} loss event {}: lost {}, total lost {}, received "
+                "{}, recv_packet_id {}, expected_pkt_id {}",
+                stream_id, loss_events, lostnmber, total_lostnmber,
+                total_pkts, recv_packet_id, expected_pkt_id);
+          }
 
           expected_pkt_id = recv_packet_id + 1;
-
-          if (cfg.Debug_mode) {
-            double loss_rate =
-                static_cast<double>(total_lostnmber) /
-                static_cast<double>(total_lostnmber + total_pkts);
-
-            std::time_t t = std::time(nullptr);
-
-            std::cout << std::ctime(&t) << "stream: " << stream_id
-                      << " lost: " << lostnmber
-                      << " total_lost: " << total_lostnmber
-                      << " total received: " << total_pkts
-                      << " loss_rate: " << std::scientific
-                      << std::setprecision(2) << loss_rate << std::endl;
-          }
-        } else {
+        } else if (likely(recv_packet_id == expected_pkt_id)) {
           expected_pkt_id++;
+        } else {
+          ++late_or_duplicate_packets;
+          if (late_or_duplicate_packets == 1 ||
+              late_or_duplicate_packets % 65536ULL == 0) {
+            cfg.logger_->warn(
+                "Stream {} discarded {} late/duplicate packet(s): "
+                "recv_packet_id {}, expected_pkt_id {}",
+                stream_id, late_or_duplicate_packets, recv_packet_id,
+                expected_pkt_id);
+          }
+          free_bufs[nb_free++] = mbuf;
+          continue;
         }
       }
       /*
@@ -420,11 +487,17 @@ static int recv2mem(void *args) {
            * Enqueue the completed batch.
            */
           batch = pool[pool_idx];
+          finalize_batch(batch);
 
           if (unlikely(!queue.try_enqueue(batch))) {
-              cfg.logger_->warn("Pktdata queue {} is full; applying backpressure", stream_id);
-              queue.wait_enqueue(batch);
+            ++queue_full_events;
+            if ((queue_full_events & (queue_full_events - 1)) == 0) {
+              cfg.logger_->warn(
+                  "Pktdata queue {} full event {}; applying backpressure",
+                  stream_id, queue_full_events);
             }
+            queue.wait_enqueue(batch);
+          }
 
           prebatchid++;
 
@@ -437,8 +510,7 @@ static int recv2mem(void *args) {
             pool_idx = 0;
 
           batch = pool[pool_idx];
-
-          batch->valid = true;
+          prepare_batch(batch, prebatchid);
         }
       }
 
@@ -447,10 +519,35 @@ static int recv2mem(void *args) {
        * Store the packet metadata and payload.
        * =====================================================
        */
-      Packet *pkt = batch->pkts[pkt_idx_inbatch];
+      Packet *pkt = &batch->buffer[pkt_idx_inbatch];
       batch->pkt_id[pkt_idx_inbatch] = recv_packet_id;
-      batch->noise_state[pkt_idx_inbatch] = m_NoiseSourceState;
-      batch->hdrs[pkt_idx_inbatch] = header;
+      batch->noise_state[pkt_idx_inbatch] =
+          metadata.noise_source_state;
+
+      // Spectral/continuum processing only reads the first VDIF header in a
+      // batch. Baseband output requires every header and its rewritten fields.
+      if (unlikely(baseband_mode)) {
+        VDIF &header = batch->hdrs[pkt_idx_inbatch];
+        rte_memcpy(header.headerPtr(), vdif_ptr, VDIF_HEADER_LEN);
+        header.configureBaseband(
+            cfg.Baseband_bits, cfg.ServerID * 16 + stream_id,
+            VDIF_PAYLOAD_LEN);
+      }
+
+      if (unlikely(batch->received_count == 0)) {
+        rte_memcpy(batch->hdrs[0].headerPtr(), vdif_ptr, VDIF_HEADER_LEN);
+        if (baseband_mode)
+          batch->hdrs[0].configureBaseband(
+              cfg.Baseband_bits, cfg.ServerID * 16 + stream_id,
+              VDIF_PAYLOAD_LEN);
+        batch->hdrs[0].setPacketId(batchid * batchsize);
+        batch->header_valid = true;
+        batch->noise_state[0] = metadata.noise_source_state;
+        last_header_template = batch->hdrs[0];
+        have_header_template = true;
+        last_noise_source_state = metadata.noise_source_state;
+      }
+      ++batch->received_count;
 
       /*
        * VDIF payload
@@ -461,7 +558,8 @@ static int recv2mem(void *args) {
        * 32 bytes VDIF header
        * 8192 bytes payload
        */
-      rte_memcpy(pkt->payload, vdif_ptr + 32, 8192);
+      rte_memcpy(pkt->payload, vdif_ptr + VDIF_HEADER_LEN,
+                 VDIF_PAYLOAD_LEN);
 
       /*
        * Defer release so the entire burst can be freed at once.

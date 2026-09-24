@@ -38,5 +38,31 @@ int main()
     if (vdif_to_timestamp_ns(34, 0, 0) != start_2017_ns)
         return 8;
 
+    VDIF header;
+    constexpr uint64_t packet_id =
+        1234ULL * VDIF::FRAMES_PER_SECOND + 5678ULL;
+    header.setPacketId(packet_id);
+    header.setWord(7, 1U);
+
+    const VDIF::Metadata metadata =
+        VDIF::readMetadata(header.headerPtr(), true);
+    if (metadata.seconds_from_epoch != 1234U ||
+        metadata.frame_number != 5678U ||
+        metadata.noise_source_state != 1U ||
+        metadata.packet_id() != packet_id)
+        return 9;
+
+    if (VDIF::readMetadata(header.headerPtr(), false)
+            .noise_source_state != 0U)
+        return 10;
+
+    header.configureBaseband(8, 17);
+    if (header.getEDV() != 1U ||
+        header.getFrameLength() != VDIF::DEFAULT_PAYLOAD_BYTES ||
+        !header.getComplex() ||
+        header.getBitsPerSample() != 8U ||
+        header.getThreadID() != 17U)
+        return 11;
+
     return 0;
 }

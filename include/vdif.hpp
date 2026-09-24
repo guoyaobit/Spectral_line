@@ -161,6 +161,22 @@ public:
 
     static constexpr size_t HEADER_SIZE = 32;
     static constexpr size_t WORDS = 8;
+    static constexpr uint32_t FRAMES_PER_SECOND = 62500;
+    static constexpr size_t DEFAULT_PAYLOAD_BYTES = 8192;
+
+    struct Metadata
+    {
+        uint32_t seconds_from_epoch;
+        uint32_t frame_number;
+        uint8_t noise_source_state;
+
+        uint64_t packet_id() const
+        {
+            return static_cast<uint64_t>(seconds_from_epoch) *
+                       FRAMES_PER_SECOND +
+                   frame_number;
+        }
+    };
 
     VDIF()
     {
@@ -197,6 +213,41 @@ public:
     uint8_t* headerPtr()
     {
         return header_;
+    }
+
+    static Metadata readMetadata(const uint8_t *buf,
+                                 bool read_noise_source)
+    {
+        const uint32_t word0 = readLE32(buf);
+        const uint32_t word1 = readLE32(buf + 4);
+        return Metadata{
+            word0 & 0x3fffffffU,
+            word1 & 0x00ffffffU,
+            static_cast<uint8_t>(
+                read_noise_source ? (readLE32(buf + 28) & 0x1U) : 0U)
+        };
+    }
+
+    void setPacketId(uint64_t packet_id)
+    {
+        setSecondsFromEpoch(static_cast<uint32_t>(
+            packet_id / FRAMES_PER_SECOND));
+        setFrameNumber(static_cast<uint32_t>(
+            packet_id % FRAMES_PER_SECOND));
+    }
+
+    void configureBaseband(uint8_t bits_per_sample,
+                           uint16_t thread_id,
+                           size_t payload_bytes = DEFAULT_PAYLOAD_BYTES)
+    {
+        setEDV(1);
+        setFrameLength(static_cast<uint32_t>(
+            payload_bytes * 8 / bits_per_sample));
+        setComplex(true);
+        setBitsPerSample(bits_per_sample);
+        setLog2Channels(0);
+        setVDIFVersion(1);
+        setThreadID(thread_id);
     }
 
     // =========================
