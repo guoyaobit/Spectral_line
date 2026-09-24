@@ -5,6 +5,7 @@
 #include "spdlog/async.h"
 #include "spdlog/sinks/stdout_sinks.h"
 #include "spdlog/spdlog.h"
+#include <ObservationId.hpp>
 #include <SpectrumSender.hpp>
 #include <cmath>
 #include <condition_variable>
@@ -121,6 +122,8 @@ public:
   // Runtime defaults.
   bool Debug_mode = false;
   int ServerID = 0;
+  std::string Observation_ID;
+  uint32_t Observation_numeric_id = 0;
   uint8_t max_streams = 16;        // Maximum number of receive streams
   uint8_t enabled_streams = 0;     // Number of enabled receive streams
   const int sampling_rate = 256e6; // samaping rate
@@ -201,6 +204,17 @@ public:
       ServerID = config["ServerID"].as<int>();
       if (ServerID < 0 || ServerID > 7)
         throw std::runtime_error("ServerID must be between 0 and 7");
+      if (!config["Observation_ID"] ||
+          !config["Observation_ID"].IsScalar())
+        throw std::runtime_error("Configuration is missing Observation_ID");
+      Observation_ID = config["Observation_ID"].as<std::string>();
+      if (!observation_id_is_valid(Observation_ID))
+        throw std::runtime_error(
+            "Observation_ID must contain 1-64 ASCII letters, digits, '.', "
+            "'_' or '-' and must not be '.' or '..'");
+      Observation_numeric_id = observation_id_numeric(Observation_ID);
+      logger_->info("Observation_ID = {} (spectrum obs_id={})",
+                    Observation_ID, Observation_numeric_id);
       if (config["Memory_pool_per_stream"])
         Memory_pool_per_stream =
             config["Memory_pool_per_stream"].as<size_t>(); // GB
@@ -235,21 +249,12 @@ public:
 
         namespace fs = std::filesystem;
 
-        auto now = std::chrono::system_clock::to_time_t(
-            std::chrono::system_clock::now());
-
-        std::tm tm;
-        localtime_r(&now, &tm);
-
-        std::ostringstream oss;
-        oss << std::put_time(&tm, "%Y%m%d_%H%M%S");
-
-        std::string datetime = oss.str();
-
-        Baseband_folder0 = Baseband_folder0 + "/" + datetime;
+        Baseband_folder0 =
+            (fs::path(Baseband_folder0) / Observation_ID).string();
         fs::create_directories(Baseband_folder0);
 
-        Baseband_folder1 = Baseband_folder1 + "/" + datetime;
+        Baseband_folder1 =
+            (fs::path(Baseband_folder1) / Observation_ID).string();
         fs::create_directories(Baseband_folder1);
       }
       if (config["subband_monitor"])
@@ -392,6 +397,7 @@ public:
           w->sender.init(Storage_node_ip, w->port,
                          static_cast<uint16_t>(ServerID));
           w->header.exposure = integration_time();
+          w->header.obs_id = Observation_numeric_id;
           w->header.channel_bw_hz = channel_bw_hz;
           w->header.subband_start_freq = sb->start_freq;
           w->header.subband_end_freq = sb->end_freq;

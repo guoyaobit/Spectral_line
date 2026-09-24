@@ -193,6 +193,12 @@ for variables, password authentication, and operational details.
 Copy and edit `config.yaml` for the observing setup. Important fields:
 
 - `observation_mode`: `0` baseband recording, `1` spectral line, `2` continuum.
+- `Observation_ID`: required identifier shared by every GPU node for one
+  observation, for example `20260924T123015Z_M87_scan003`. It must contain
+  1-64 ASCII letters, digits, `.`, `_`, or `-`. Change it before every
+  observation. Baseband mode uses it as the directory name; spectral-line and
+  continuum modes publish its CRC32C value in `spectrum_header.obs_id` without
+  changing the version-2 header layout.
 - `Memory_pool_per_stream`: pinned/RAM pool in GiB. Total allocation scales with
   enabled streams; start conservatively.
 - `integration_t`, `win_bw`, and `win_channels`: determine FFT length and
@@ -228,7 +234,10 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   destination port. The Writer's `result_ports` list only declares the unique
   TCP ports on which it listens, and its order has no meaning.
 - `Baseband_Folder0`/`Baseband_Folder1`: writable high-throughput filesystems
-  used only in baseband mode.
+  used only in baseband mode. Both paths receive the same `Observation_ID`
+  subdirectory. Files from both directories can be merged directly into one
+  storage-server observation directory because each filename contains the
+  global physical subband, beam, polarization, and part number.
 - `Baseband_bits`: `8`, `4`, or `2`. The program converts each FPGA
   offset-binary component to VDIF two's-complement coding. For 4-bit and 2-bit
   output it then retains the most-significant bits and packs respectively two
@@ -236,6 +245,25 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   are written in the VDIF-standard I,Q order.
 - `noise_source.duty_cycle`: percentage in the open interval `(0, 100)`.
   A value of `50` means 50% of each configured period is ON.
+
+For baseband mode, a node writes concurrently to:
+
+```text
+/data/<Observation_ID>/
+/data1/<Observation_ID>/
+```
+
+After the observation has stopped, transfer both directories into the same
+storage-server directory. The filenames are cluster-wide unique, so the two
+local disk trees and all GPU nodes can be merged without `diskN` or `serverNN`
+subdirectories:
+
+```sh
+rsync -a --partial /data/<Observation_ID>/ \
+  root@STORAGE:/archive/baseband/<Observation_ID>/
+rsync -a --partial /data1/<Observation_ID>/ \
+  root@STORAGE:/archive/baseband/<Observation_ID>/
+```
 
 Ensure every enabled subband maps to an available GPU and that all configured
 spectrum windows lie within its subband.

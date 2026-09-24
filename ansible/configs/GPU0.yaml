@@ -5,6 +5,7 @@
 # ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml
 Debug: false
 ServerID: 0
+Observation_ID: 20260924T000000Z_example_scan001
 Memory_pool_per_stream: 8
 observation_mode: 1
 cal_mode: false

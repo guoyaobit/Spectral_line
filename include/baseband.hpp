@@ -6,7 +6,6 @@
 #include <cstring>
 #include <cerrno>
 #include <cstdio>
-#include <ctime>
 #include <stdexcept>
 #include <string>
 #include <filesystem>
@@ -52,29 +51,19 @@ private:
 
         const unsigned int current_file_index = file_index;
         const char *pol = (m_stream_id % 2 == 0) ? "X" : "Y";
-
-        const time_t now = static_cast<time_t>(std::time(nullptr));
-
-        struct tm utc_tm {};
-        gmtime_r(&now, &utc_tm);
-
-        char utc_date[16];
-        char utc_time[16];
-
-        std::strftime(utc_date, sizeof(utc_date),
-                    "%Y-%m-%d", &utc_tm);
-
-        std::strftime(utc_time, sizeof(utc_time),
-                    "%H:%M:%S", &utc_tm);
+        const char *beam =
+            cfg.subbands[m_subband_id]->beam == BeamId::A ? "A" : "B";
+        const unsigned int global_subband =
+            static_cast<unsigned int>(cfg.ServerID * 4 + m_subband_id / 2);
 
         const int filename_length = std::snprintf(
                 basename,
                 sizeof(basename),
-                "%s_%s_%s_b%02u_%s_t%04u.vdif",
+                "%s_%s_sb%02u_%s_%s_part%04u.vdif",
                 cfg.receiver_name.c_str(),
-                utc_date,
-                utc_time,
-                static_cast<unsigned int>(m_subband_id+cfg.ServerID*8),
+                cfg.Observation_ID.c_str(),
+                global_subband,
+                beam,
                 pol,
                 current_file_index);
         if (filename_length < 0 ||
