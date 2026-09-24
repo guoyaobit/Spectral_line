@@ -204,17 +204,29 @@ public:
       ServerID = config["ServerID"].as<int>();
       if (ServerID < 0 || ServerID > 7)
         throw std::runtime_error("ServerID must be between 0 and 7");
-      if (!config["Observation_ID"] ||
-          !config["Observation_ID"].IsScalar())
-        throw std::runtime_error("Configuration is missing Observation_ID");
-      Observation_ID = config["Observation_ID"].as<std::string>();
-      if (!observation_id_is_valid(Observation_ID))
-        throw std::runtime_error(
-            "Observation_ID must contain 1-64 ASCII letters, digits, '.', "
-            "'_' or '-' and must not be '.' or '..'");
-      Observation_numeric_id = observation_id_numeric(Observation_ID);
-      logger_->info("Observation_ID = {} (spectrum obs_id={})",
-                    Observation_ID, Observation_numeric_id);
+      Observation_ID.clear();
+      Observation_numeric_id = 0;
+      const YAML::Node observation_id_node = config["Observation_ID"];
+      if (observation_id_node && !observation_id_node.IsNull()) {
+        if (!observation_id_node.IsScalar())
+          throw std::runtime_error("Observation_ID must be a scalar");
+        Observation_ID = observation_id_node.as<std::string>();
+        if (!Observation_ID.empty() &&
+            !observation_id_is_valid(Observation_ID))
+          throw std::runtime_error(
+              "Observation_ID must contain 1-64 ASCII letters, digits, '.', "
+              "'_' or '-' and must not be '.' or '..'");
+        if (!Observation_ID.empty())
+          Observation_numeric_id = observation_id_numeric(Observation_ID);
+      }
+      if (!Observation_ID.empty()) {
+        logger_->info("Observation_ID = {} (spectrum obs_id={})",
+                      Observation_ID, Observation_numeric_id);
+      } else {
+        logger_->warn(
+            "Observation_ID is not configured; using manual mode with "
+            "spectrum obs_id=0");
+      }
       if (config["Memory_pool_per_stream"])
         Memory_pool_per_stream =
             config["Memory_pool_per_stream"].as<size_t>(); // GB
@@ -249,12 +261,19 @@ public:
 
         namespace fs = std::filesystem;
 
+        const std::string observation_directory =
+            Observation_ID.empty() ? automatic_observation_directory_id()
+                                   : Observation_ID;
+        if (Observation_ID.empty())
+          logger_->warn("Manual baseband observation directory: {}",
+                        observation_directory);
+
         Baseband_folder0 =
-            (fs::path(Baseband_folder0) / Observation_ID).string();
+            (fs::path(Baseband_folder0) / observation_directory).string();
         fs::create_directories(Baseband_folder0);
 
         Baseband_folder1 =
-            (fs::path(Baseband_folder1) / Observation_ID).string();
+            (fs::path(Baseband_folder1) / observation_directory).string();
         fs::create_directories(Baseband_folder1);
       }
       if (config["subband_monitor"])

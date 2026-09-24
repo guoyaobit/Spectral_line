@@ -95,5 +95,11 @@ int main()
         observation_id_is_valid(std::string(65, 'a')))
         return 15;
 
+    const std::string automatic_id = automatic_observation_directory_id();
+    if (!observation_id_is_valid(automatic_id) ||
+        automatic_id.size() != 20 || automatic_id[8] != 'T' ||
+        automatic_id[15] != '.' || automatic_id.back() != 'Z')
+        return 16;
+
     return 0;
 }

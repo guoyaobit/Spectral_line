@@ -163,9 +163,9 @@ The controller contains eight complete, directly editable configuration files:
 does not calculate or merge frequency values during deployment; it validates
 and copies the file matching each host's `spectral_line_server_id`.
 
-The identifier is required in baseband, spectral-line, and continuum modes;
-use only 1-64 letters, digits, `.`, `_`, and `-` characters. The safest way to
-set one value on every selected GPU node is the controller override:
+For controller-managed observations, use only 1-64 letters, digits, `.`, `_`,
+and `-` characters and set one value on every selected GPU node with the
+controller override:
 
 ```sh
 ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml \
@@ -174,7 +174,9 @@ ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml \
 ```
 
 Without this variable, deployment uses the `Observation_ID` stored in each
-server's static YAML file.
+server's static YAML file. Outside this static Ansible workflow the application
+also supports manual operation with the key omitted; all spectrum senders then
+use `obs_id=0`.
 
 | Static file | ServerID | ETH0 input IPv4 | ETH0 ranges (MHz) | ETH1 input IPv4 | ETH1 ranges (MHz) |
 |---|---:|---|---|---|---|

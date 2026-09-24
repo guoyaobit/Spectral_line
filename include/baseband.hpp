@@ -59,9 +59,8 @@ private:
         const int filename_length = std::snprintf(
                 basename,
                 sizeof(basename),
-                "%s_%s_sb%02u_%s_%s_part%04u.vdif",
+                "%s_sb%02u_%s_%s_part%04u.vdif",
                 cfg.receiver_name.c_str(),
-                cfg.Observation_ID.c_str(),
                 global_subband,
                 beam,
                 pol,
