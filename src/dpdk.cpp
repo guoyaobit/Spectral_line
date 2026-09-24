@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <rte_common.h>
+#include <rte_cycles.h>
 #include <rte_eal.h>
 #include <rte_ether.h>
 #include <rte_ethdev.h>
@@ -241,6 +242,13 @@ static int recv2mem(void *args) {
   uint64_t total_lostnmber = 0;
   uint64_t total_pkts = 0;
   uint64_t loss_events = 0;
+  uint64_t pending_loss_events = 0;
+  uint64_t pending_lost_packets = 0;
+  uint64_t latest_loss_packets = 0;
+  uint64_t latest_loss_recv_id = 0;
+  uint64_t latest_loss_expected_id = 0;
+  uint64_t last_loss_report_cycles = 0;
+  const uint64_t loss_report_interval_cycles = rte_get_timer_hz() * 2ULL;
   uint64_t late_or_duplicate_packets = 0;
   uint64_t misdirected_packets = 0;
   uint64_t queue_full_events = 0;
@@ -248,6 +256,26 @@ static int recv2mem(void *args) {
   VDIF last_header_template;
   bool have_header_template = false;
   uint8_t last_noise_source_state = 0;
+
+  const auto report_pending_loss = [&]() {
+    if (pending_loss_events == 0)
+      return;
+    const uint64_t now = rte_get_timer_cycles();
+    if (last_loss_report_cycles != 0 &&
+        now - last_loss_report_cycles < loss_report_interval_cycles)
+      return;
+
+    cfg.logger_->warn(
+        "Stream {} packet loss (2 s report): events {}, lost {}, total "
+        "events {}, total lost {}, received {}, latest gap {}, "
+        "recv_packet_id {}, expected_pkt_id {}",
+        stream_id, pending_loss_events, pending_lost_packets, loss_events,
+        total_lostnmber, total_pkts, latest_loss_packets,
+        latest_loss_recv_id, latest_loss_expected_id);
+    pending_loss_events = 0;
+    pending_lost_packets = 0;
+    last_loss_report_cycles = now;
+  };
 
   const auto prepare_batch = [&](PacketBatch *batch, uint64_t batch_id) {
     batch->batch_id = batch_id;
@@ -296,8 +324,11 @@ static int recv2mem(void *args) {
      */
     const uint16_t nb_rx = rte_eth_rx_burst(port, queue_id, bufs, BURST_SIZE);
 
-    if (unlikely(nb_rx == 0))
+    if (unlikely(nb_rx == 0)) {
+      if (pending_loss_events != 0)
+        report_pending_loss();
       continue;
+    }
     unsigned int nb_free = 0;
 
     /*
@@ -428,11 +459,10 @@ static int recv2mem(void *args) {
           continue;
         }
         expected_pkt_id = recv_packet_id;
-        cfg.logger_->info("First packet_id is {} ,on stream {}, seconds is {}, "
-                          "framenumber is {}",
-                          expected_pkt_id, stream_id,
-                          metadata.seconds_from_epoch,
-                          metadata.frame_number);
+        cfg.logger_->info(
+            "Stream {} first valid packet: packet_id {}, seconds {}, frame {}",
+            stream_id, expected_pkt_id, metadata.seconds_from_epoch,
+            metadata.frame_number);
 
         expected_pkt_id++;
         prebatchid = batchid;
@@ -442,16 +472,14 @@ static int recv2mem(void *args) {
           const uint64_t lostnmber = recv_packet_id - expected_pkt_id;
           total_lostnmber += lostnmber;
           ++loss_events;
-
-          // Logging every gap can itself stall a receive lcore. Report only
-          // exponentially spaced events while keeping exact counters.
-          if ((loss_events & (loss_events - 1)) == 0) {
-            cfg.logger_->warn(
-                "Stream {} loss event {}: lost {}, total lost {}, received "
-                "{}, recv_packet_id {}, expected_pkt_id {}",
-                stream_id, loss_events, lostnmber, total_lostnmber,
-                total_pkts, recv_packet_id, expected_pkt_id);
-          }
+          ++pending_loss_events;
+          pending_lost_packets += lostnmber;
+          latest_loss_packets = lostnmber;
+          latest_loss_recv_id = recv_packet_id;
+          latest_loss_expected_id = expected_pkt_id;
+          // The first loss is reported immediately. Further events are
+          // accumulated and emitted at most once every two seconds.
+          report_pending_loss();
 
           expected_pkt_id = recv_packet_id + 1;
         } else if (likely(recv_packet_id == expected_pkt_id)) {
@@ -575,6 +603,7 @@ static int recv2mem(void *args) {
     if (nb_free != 0) {
       rte_pktmbuf_free_bulk(free_bufs, nb_free);
     }
+    report_pending_loss();
   }
 
   return 0;

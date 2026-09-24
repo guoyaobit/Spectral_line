@@ -59,11 +59,13 @@ extern "C" __global__ void stokes_IQUV_accumulate(complexf *__restrict__ A, //
 
   float x_rey_im = x_re * y_im;
   float x_imy_re = x_im * y_re;
-  // Accumulate the four products for this frequency bin.
-  atomicAdd(&pf4SumStokes[idx].x, xx);
-  atomicAdd(&pf4SumStokes[idx].y, yy);
-  atomicAdd(&pf4SumStokes[idx].z, x_rey_im);
-  atomicAdd(&pf4SumStokes[idx].w, x_imy_re);
+  // Each CUDA thread owns exactly one frequency bin, and launches using this
+  // accumulator are serialized on sD2H. There are no concurrent writers to
+  // this element, so atomics only add unnecessary GPU serialization.
+  pf4SumStokes[idx].x += xx;
+  pf4SumStokes[idx].y += yy;
+  pf4SumStokes[idx].z += x_rey_im;
+  pf4SumStokes[idx].w += x_imy_re;
 }
 
 extern "C" __global__ void kernel_pfb_sum(const complexf *__restrict__ ring, // Ring buffer [W = num_taps*m_Nfft]
@@ -337,8 +339,12 @@ public:
     while (1) {
       log_connection_events();
       auto &slot = m_hring[idx];
+      if (!slot.used.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        continue;
+      }
 
-      if (slot.used.load(std::memory_order_acquire) && cudaEventQuery(slot.event) == cudaSuccess) {
+      {
         if (cfg.Debug_mode) {
           if(cfg.observation_mode == ObservationMode::SPECTRAL){
             float max = 0;
@@ -629,7 +635,9 @@ public:
               m_acc_on_first_timestamp_ns;
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
           if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
-            cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
+            cfg.logger_->warn(
+                "Subband {} GPU {} result ring full at slot {}",
+                m_subband_id, m_config->gpu_id, m_hhead);
           }
           if(cfg.observation_mode == ObservationMode::SPECTRAL)
           cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_ON, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
@@ -637,8 +645,11 @@ public:
           cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_ON, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
           m_hring[m_hhead].noise_state = NoiseState::ON;
 
-          cudaEventRecord(m_hring[m_hhead].event, sD2H);
-
+          // Publish the host slot only after its asynchronous D2H copy has
+          // completed. The result sender therefore never needs a CUDA
+          // context and only consumes immutable host memory.
+          CUDA_CHECK(cudaEventRecord(m_hring[m_hhead].event, sD2H));
+          CUDA_CHECK(cudaEventSynchronize(m_hring[m_hhead].event));
           m_hring[m_hhead].used.store(true, std::memory_order_release);
 
           cudaMemsetAsync(m_acc_stokes_ON, 0, m_Nfft * sizeof(float4), sD2H);
@@ -674,7 +685,9 @@ public:
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
 
           if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
-            cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
+            cfg.logger_->warn(
+                "Subband {} GPU {} result ring full at slot {}",
+                m_subband_id, m_config->gpu_id, m_hhead);
           }
           if(cfg.observation_mode == ObservationMode::SPECTRAL)
           cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
@@ -683,8 +696,9 @@ public:
 
           m_hring[m_hhead].noise_state = NoiseState::OFF;
 
-          cudaEventRecord(m_hring[m_hhead].event, sD2H);
-
+          // See the ON path above: CUDA completion belongs to this GPU worker.
+          CUDA_CHECK(cudaEventRecord(m_hring[m_hhead].event, sD2H));
+          CUDA_CHECK(cudaEventSynchronize(m_hring[m_hhead].event));
           m_hring[m_hhead].used.store(true, std::memory_order_release);
 
           cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H);
@@ -710,7 +724,9 @@ public:
       if (m_acc_id >= m_acc_len) {
         m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
         if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
-          cfg.logger_->warn("GPU ring buffer overflow slot {}", m_hhead);
+          cfg.logger_->warn(
+              "Subband {} GPU {} result ring full at slot {}",
+              m_subband_id, m_config->gpu_id, m_hhead);
         }
         if(cfg.observation_mode == ObservationMode::SPECTRAL)
         cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
@@ -718,7 +734,9 @@ public:
         cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
         m_hring[m_hhead].noise_state = NoiseState::OFF;
 
-        cudaEventRecord(m_hring[m_hhead].event, sD2H);
+        // Complete D2H on the GPU worker before exposing this host slot.
+        CUDA_CHECK(cudaEventRecord(m_hring[m_hhead].event, sD2H));
+        CUDA_CHECK(cudaEventSynchronize(m_hring[m_hhead].event));
         m_acc_id = 0;
         m_hring[m_hhead].used.store(true, std::memory_order_release);
         cudaMemsetAsync(d_sumPower_OFF,0,sizeof(float),sD2H);

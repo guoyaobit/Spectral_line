@@ -194,6 +194,8 @@ public:
       YAML::Node config = YAML::LoadFile(filename);
       if (config["Debug"])
         Debug_mode = config["Debug"].as<bool>();
+      logger_->set_level(Debug_mode ? spdlog::level::debug
+                                   : spdlog::level::info);
       if (!config["ServerID"] || !config["ServerID"].IsScalar())
         throw std::runtime_error("Configuration is missing ServerID");
       ServerID = config["ServerID"].as<int>();
@@ -404,7 +406,7 @@ public:
           w->header.stokes = 4;
           w->header.cal_mode = cal_mode ? 1 : 0;
           w->header.window_id = win_id++;
-          logger_->info(
+          logger_->debug(
               "subband config {} -> global {} beam {} window {}: "
               "requested center {:.9f} MHz, "
               "output [{:.9f}, {:.9f}) MHz, channel width {:.9f} Hz, "

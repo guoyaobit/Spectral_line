@@ -338,7 +338,8 @@ To change concurrency without editing the unit, create
 `/etc/default/spectral-line-monitor`:
 
 ```sh
-MONITOR_PLOT_WORKERS=16
+MONITOR_PLOT_WORKERS=4
+MONITOR_PLOT_INTERVAL_SECONDS=2
 ```
 
 The monitor accepts updates from all 16 stream files in one scan and submits

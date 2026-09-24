@@ -40,14 +40,14 @@ python monitor/plot_monitor.py
 ```
 
 With no arguments, the script continuously scans
-`/dev/shm/server_*_stream_*.bin`. Whenever a stream changes, worker processes
-simultaneously regenerate its three 300-DPI images and three 320x120 thumbnails
-directly under `/dev/shm/monitor_plots/`; no quality-specific subdirectories
-are created. Thumbnails are downscaled from the high-quality render instead of
-being plotted a second time. Images are replaced atomically,
+`/dev/shm/server_*_stream_*.bin`. Changed streams are rendered at most once
+every two seconds. Worker processes regenerate three 180-DPI images and three
+320x120 thumbnails directly under `/dev/shm/monitor_plots/`; no
+quality-specific subdirectories are created. Thumbnails are downscaled from
+the high-quality render instead of being plotted a second time. Images are replaced atomically,
 so readers never observe partially written JPEGs. Image names use
 `<subband>_<beam>_<polarization>_<type>_<quality>.jpg`, where subband is
-`0–31`, beam is `A` or `B`, polarization is `X` or `Y`, type is
+`1–32`, beam is `A` or `B`, polarization is `X` or `Y`, type is
 `1` (raw ADC), `2` (normal-distribution histogram), or `3` (frequency
 spectrum), and quality is `hq` or `lq`. For example:
 `1_A_X_1_hq.jpg` and `2_B_Y_2_lq.jpg`. Run
@@ -61,10 +61,11 @@ its first valid packet. Missing-input streams therefore do not appear as empty
 or zero-filled monitor files.
 
 The monitor supports all 16 streams updating in the same cycle. By default it
-uses up to 16 rendering processes, capped by the host's logical CPU count. Set
-`MONITOR_PLOT_WORKERS` in `/etc/default/spectral-line-monitor` to reduce
-concurrency when CPU or memory must be reserved for the DPDK receiver. See
-`docs/deployment.md` for the systemd installation steps.
+uses up to four rendering processes, capped by the host's logical CPU count.
+Set `MONITOR_PLOT_WORKERS` and `MONITOR_PLOT_INTERVAL_SECONDS` in
+`/etc/default/spectral-line-monitor` to tune concurrency and refresh rate when
+CPU or memory must be reserved for the DPDK receiver. See `docs/deployment.md`
+for the systemd installation steps.
 
 When every changed stream in a scan has rendered successfully, the service
 atomically replaces `/dev/shm/monitor_plots/manifest.json`. A failed render

@@ -25,7 +25,7 @@ static void remove_stale_monitor_files(GlobalConfig &cfg) {
                         std::strerror(errno));
     }
   }
-  cfg.logger_->info("Removed {} stale monitor file(s) for server {}",
+  cfg.logger_->debug("Removed {} stale monitor file(s) for server {}",
                     removed_files, cfg.ServerID);
 }
 

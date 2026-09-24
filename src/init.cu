@@ -78,10 +78,10 @@ void subband_thread(int subband_id) {
     cfg.ready_threads++;
   }
   cfg.init_cv.notify_all();
-  cfg.logger_->info("subband {} ready {}/{}", subband_id, cfg.ready_threads,
+  cfg.logger_->debug("subband {} ready {}/{}", subband_id, cfg.ready_threads,
                     cfg.total_threads);
   {
-    cfg.logger_->info("subband {}: spectrum line mode, PFB window generated",
+    cfg.logger_->debug("subband {}: spectrum line mode, PFB window generated",
                       subband_id);
     size_t num_taps = 4;
     // PFB/FFT parameters.
@@ -105,7 +105,7 @@ void baseband_thread(int streamid) {
     cfg.ready_threads++;
   }
   cfg.init_cv.notify_all();
-  cfg.logger_->info("BASEBAND {}: ready {}/{}", streamid, cfg.ready_threads,
+  cfg.logger_->debug("BASEBAND {}: ready {}/{}", streamid, cfg.ready_threads,
                     cfg.total_threads);
   while (true) {
     baseband_obj->recoder();
@@ -151,7 +151,7 @@ int init() {
     stream.subband_id = s / 2;
 
     if (!cfg.subbands[stream.subband_id]->enable) {
-      cfg.logger_->info("stream {} disabled (subband {})", s,
+      cfg.logger_->debug("stream {} disabled (subband {})", s,
                         stream.subband_id);
 
       continue;
@@ -225,7 +225,7 @@ int init() {
     for (int i = 0; i < cfg.max_streams; ++i) {
       int subband_id = i / 2;
       if (!cfg.subbands[subband_id]->enable) {
-        cfg.logger_->info("subband {} is disabled, skip stream {}.", subband_id,
+        cfg.logger_->debug("subband {} is disabled, skip stream {}.", subband_id,
                           i);
         continue;
       }
@@ -235,16 +235,16 @@ int init() {
       unsigned cpu_id = cfg.max_streams + 1 + i;
       CPU_SET(cpu_id, &cpuset);
       pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
-      cfg.logger_->info("BASEBAND {}: thread pinned to CPU {}", i, cpu_id);
+      cfg.logger_->debug("BASEBAND {}: thread pinned to CPU {}", i, cpu_id);
       t.detach();
     }
   } else {
     for (size_t i = 0; i < cfg.subbands.size(); ++i) {
       if (!cfg.subbands[i]->enable) {
-        cfg.logger_->info("subband {} is disabled, skip it.", i);
+        cfg.logger_->debug("subband {} is disabled, skip it.", i);
         continue;
       }
-      cfg.logger_->info("subband {}: starting thread on GPU {}", i,
+      cfg.logger_->debug("subband {}: starting thread on GPU {}", i,
                         cfg.subbands[i]->gpu_id);
 
       std::thread t(subband_thread, i);
@@ -253,7 +253,7 @@ int init() {
       unsigned cpu_id = cfg.max_streams + 1 + i;
       CPU_SET(cpu_id, &cpuset);
       pthread_setaffinity_np(t.native_handle(), sizeof(cpu_set_t), &cpuset);
-      cfg.logger_->info("subband {}: thread pinned to CPU {}", i, cpu_id);
+      cfg.logger_->debug("subband {}: thread pinned to CPU {}", i, cpu_id);
       t.detach();
     }
   }

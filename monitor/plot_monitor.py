@@ -38,11 +38,12 @@ PAYLOAD_SIZE = 8192
 SAMPLE_RATE = 256e6
 ADC_PLOT_SAMPLES = 1024
 POLL_INTERVAL_SECONDS = 1.0
+DEFAULT_RENDER_INTERVAL_SECONDS = 2.0
 HIGH_SIZE = (12, 4.5)
-HIGH_DPI = 300
+HIGH_DPI = 180
 THUMBNAIL_PIXELS = (320, 120)
 MAX_STREAMS = 16
-DEFAULT_WORKERS = min(MAX_STREAMS, os.cpu_count() or 1)
+DEFAULT_WORKERS = min(4, os.cpu_count() or 1)
 IMAGE_KINDS = (
     ("adc", 1),
     ("histogram", 2),
@@ -76,6 +77,24 @@ def configured_workers():
     if workers <= 0:
         raise ValueError("MONITOR_PLOT_WORKERS must be greater than zero")
     return min(workers, MAX_STREAMS)
+
+
+def configured_render_interval():
+    raw_value = os.environ.get(
+        "MONITOR_PLOT_INTERVAL_SECONDS",
+        str(DEFAULT_RENDER_INTERVAL_SECONDS),
+    )
+    try:
+        interval = float(raw_value)
+    except ValueError as error:
+        raise ValueError(
+            "MONITOR_PLOT_INTERVAL_SECONDS must be a number"
+        ) from error
+    if interval <= 0:
+        raise ValueError(
+            "MONITOR_PLOT_INTERVAL_SECONDS must be greater than zero"
+        )
+    return interval
 
 
 def read_monitor_snapshot(filename, retries=5, retry_delay=0.01):
@@ -186,7 +205,7 @@ def save_versions(figure, output_dir, identity, type_id):
             dpi=HIGH_DPI,
             bbox_inches="tight",
             facecolor="white",
-            pil_kwargs={"quality": HIGH_JPEG_QUALITY, "optimize": True},
+            pil_kwargs={"quality": HIGH_JPEG_QUALITY},
         )
         with Image.open(high_temporary) as image:
             image.thumbnail(THUMBNAIL_PIXELS, THUMBNAIL_RESAMPLE)
@@ -194,7 +213,6 @@ def save_versions(figure, output_dir, identity, type_id):
                 thumbnail_temporary,
                 format="JPEG",
                 quality=LOW_JPEG_QUALITY,
-                optimize=True,
             )
 
         # Each file is always complete when it becomes visible to readers.
@@ -348,12 +366,13 @@ def remove_legacy_images():
         print("Removed %d legacy monitor image(s)." % removed, flush=True)
 
 
-def publish_manifest(entries):
+def publish_manifest(entries, render_interval):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     manifest = {
         "version": str(time.time_ns()),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "poll_interval_ms": int(POLL_INTERVAL_SECONDS * 1000),
+        "render_interval_ms": int(render_interval * 1000),
         "streams": [entries[name] for name in sorted(entries)],
     }
     destination = OUTPUT_DIR / "manifest.json"
@@ -369,12 +388,16 @@ def publish_manifest(entries):
         temporary.unlink(missing_ok=True)
 
 
-def collect_updates(previous_digests, reported_errors):
+def collect_updates(previous_digests, reported_errors, next_checks,
+                    now, render_interval):
     updates = []
     stream_files = sorted(
         path for path in MONITOR_DIR.glob(STREAM_PATTERN) if path.is_file()
     )
     for filename in stream_files:
+        if now < next_checks.get(filename, 0.0):
+            continue
+        next_checks[filename] = now + render_interval
         try:
             identity = decode_stream_identity(filename)
             snapshot, digest = read_monitor_snapshot(filename)
@@ -393,21 +416,31 @@ def run_monitor(render_once):
     digests = {}
     manifest_entries = {}
     reported_errors = {}
+    next_checks = {}
     workers = configured_workers()
+    render_interval = configured_render_interval()
     print(
-        "Monitoring %s with %d rendering process(es)." % (MONITOR_DIR, workers),
+        "Monitoring %s with %d rendering process(es), %.1f s refresh."
+        % (MONITOR_DIR, workers, render_interval),
         flush=True,
     )
 
     with ProcessPoolExecutor(max_workers=workers) as executor:
         while True:
             cycle_started = time.monotonic()
-            stream_files, updates = collect_updates(digests, reported_errors)
+            stream_files, updates = collect_updates(
+                digests,
+                reported_errors,
+                next_checks,
+                cycle_started,
+                render_interval,
+            )
             active_files = set(stream_files)
             removed = [path for path in digests if path not in active_files]
             for filename in removed:
                 digests.pop(filename, None)
                 manifest_entries.pop(filename.stem, None)
+                next_checks.pop(filename, None)
 
             futures = {
                 executor.submit(
@@ -443,7 +476,7 @@ def run_monitor(render_once):
             if cycle_succeeded and (
                 rendered or removed or not (OUTPUT_DIR / "manifest.json").exists()
             ):
-                publish_manifest(manifest_entries)
+                publish_manifest(manifest_entries, render_interval)
 
             if render_once:
                 if not stream_files:
