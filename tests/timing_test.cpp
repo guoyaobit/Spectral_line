@@ -59,15 +59,30 @@ int main()
 
     header.configureBaseband(8, 17);
     if (header.getEDV() != 1U ||
-        header.getFrameLength() != VDIF::DEFAULT_PAYLOAD_BYTES ||
+        header.getFrameLength() !=
+            VDIF::HEADER_SIZE + VDIF::DEFAULT_PAYLOAD_BYTES ||
         !header.getComplex() ||
         header.getBitsPerSample() != 8U ||
         header.getThreadID() != 17U)
         return 11;
 
+    header.configureBaseband(4, 18);
+    if (header.getFrameLength() !=
+            VDIF::HEADER_SIZE + VDIF::DEFAULT_PAYLOAD_BYTES / 2 ||
+        header.getBitsPerSample() != 4U ||
+        header.getThreadID() != 18U)
+        return 12;
+
+    header.configureBaseband(2, 19);
+    if (header.getFrameLength() !=
+            VDIF::HEADER_SIZE + VDIF::DEFAULT_PAYLOAD_BYTES / 4 ||
+        header.getBitsPerSample() != 2U ||
+        header.getThreadID() != 19U)
+        return 13;
+
     static constexpr char crc_input[] = "123456789";
     if (spectrum_crc32c(crc_input, sizeof(crc_input) - 1) != 0xe3069283U)
-        return 12;
+        return 14;
 
     return 0;
 }

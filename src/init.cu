@@ -119,7 +119,7 @@ size_t calc_pool_size() {
   size_t batch_bytes = sizeof(Packet) * cfg.batchsize();
 
   size_t pool_size = MAX_POOL_MEMORY / batch_bytes;
-  return std::max<size_t>(pool_size, 2);
+  return std::max<size_t>(pool_size, 3);
 }
 int init() {
   auto &cfg = GlobalConfig::getInstance();
@@ -136,7 +136,9 @@ int init() {
   } else
     cfg.total_threads = enabled_subbands;
 
-  cfg.QUEUE_CAPACITY = calc_pool_size();
+  // Reserve one batch for the consumer and one for the producer. The
+  // remaining batches are the maximum number that may be queued.
+  cfg.QUEUE_CAPACITY = calc_pool_size() - 2;
 
   cfg.streams.reserve(cfg.max_streams);
 
@@ -164,14 +166,18 @@ int init() {
   cfg.enabled_streams = enabled_streams;
 
   int batchsize = cfg.batchsize();
+  // A full queue, the batch currently owned by the consumer, and the batch
+  // currently being filled by the producer must all have distinct storage.
+  const size_t pool_capacity = cfg.QUEUE_CAPACITY + 2;
 
   // Allocate packet memory only for enabled streams.
   uint64_t total_packets =
-      static_cast<uint64_t>(enabled_streams) * cfg.QUEUE_CAPACITY * batchsize;
+      static_cast<uint64_t>(enabled_streams) * pool_capacity * batchsize;
 
   uint64_t total_bytes = total_packets * sizeof(Packet);
 
   cfg.logger_->info("QUEUE_CAPACITY = {}", cfg.QUEUE_CAPACITY);
+  cfg.logger_->info("Packet batches per stream = {}", pool_capacity);
 
   cfg.logger_->info("Enabled streams = {}", enabled_streams);
   // Baseband recording does not require CUDA-pinned host memory.
@@ -207,11 +213,11 @@ int init() {
     if (!stream.enable)
       continue;
 
-    stream.pool.resize(cfg.QUEUE_CAPACITY);
+    stream.pool.resize(pool_capacity);
 
-    for (size_t b = 0; b < cfg.QUEUE_CAPACITY; ++b) {
+    for (size_t b = 0; b < pool_capacity; ++b) {
       uint64_t offset =
-          (static_cast<uint64_t>(stream.pool_index) * cfg.QUEUE_CAPACITY + b) *
+          (static_cast<uint64_t>(stream.pool_index) * pool_capacity + b) *
           batchsize;
 
       Packet *buffer = cfg.packet_pool + offset;

@@ -302,9 +302,11 @@ static int recv2mem(void *args) {
       const uint64_t expected_id = batch_start_id + i;
       if (batch->pkt_id[i] == expected_id)
         continue;
-      std::memset(batch->buffer[i].payload, 0, VDIF_PAYLOAD_LEN);
+      // FPGA samples are offset binary, where 0x80 represents zero voltage.
+      std::memset(batch->buffer[i].payload, 0x80, VDIF_PAYLOAD_LEN);
       batch->hdrs[i] = batch->hdrs[0];
       batch->hdrs[i].setPacketId(expected_id);
+      batch->hdrs[i].setInvalid(true);
     }
   };
 

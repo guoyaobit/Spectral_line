@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 /*
@@ -240,9 +241,20 @@ public:
                            uint16_t thread_id,
                            size_t payload_bytes = DEFAULT_PAYLOAD_BYTES)
     {
+        if (bits_per_sample == 0 || bits_per_sample > 32 ||
+            payload_bytes > std::numeric_limits<size_t>::max() /
+                                bits_per_sample ||
+            (payload_bytes * bits_per_sample) % 8 != 0)
+            throw std::invalid_argument("invalid baseband sample format");
+
+        const size_t packed_payload_bytes =
+            payload_bytes * bits_per_sample / 8;
+        const size_t frame_bytes = HEADER_SIZE + packed_payload_bytes;
+        if (frame_bytes % 8 != 0 || frame_bytes > 0x00ffffffULL * 8ULL)
+            throw std::invalid_argument("invalid VDIF frame length");
+
         setEDV(1);
-        setFrameLength(static_cast<uint32_t>(
-            payload_bytes * 8 / bits_per_sample));
+        setFrameLength(static_cast<uint32_t>(frame_bytes));
         setComplex(true);
         setBitsPerSample(bits_per_sample);
         setLog2Channels(0);

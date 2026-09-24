@@ -229,9 +229,11 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   TCP ports on which it listens, and its order has no meaning.
 - `Baseband_Folder0`/`Baseband_Folder1`: writable high-throughput filesystems
   used only in baseband mode.
-- `Baseband_bits`: `8`, `4`, or `2`. For 4-bit and 2-bit output, the program
-  retains the most-significant bits of each original 8-bit component and packs
-  them respectively two or four samples per byte.
+- `Baseband_bits`: `8`, `4`, or `2`. The program converts each FPGA
+  offset-binary component to VDIF two's-complement coding. For 4-bit and 2-bit
+  output it then retains the most-significant bits and packs respectively two
+  or four components per byte. FPGA complex samples arrive in Q,I order and
+  are written in the VDIF-standard I,Q order.
 - `noise_source.duty_cycle`: percentage in the open interval `(0, 100)`.
   A value of `50` means 50% of each configured period is ON.
 

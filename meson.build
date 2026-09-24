@@ -65,3 +65,10 @@ timing_test = executable(
     include_directories: inc,
 )
 test('timing', timing_test)
+
+baseband_format_test = executable(
+    'baseband_format_test',
+    'tests/baseband_format_test.cpp',
+    include_directories: inc,
+)
+test('baseband-format', baseband_format_test)
