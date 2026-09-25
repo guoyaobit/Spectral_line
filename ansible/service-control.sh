@@ -51,22 +51,22 @@ COMMON_ARGS=(
 case "$ACTION" in
   start)
     ansible "${COMMON_ARGS[@]}" \
-      --module-name ansible.builtin.systemd \
+      --module-name systemd \
       --args "name=spectral-line.service state=started enabled=false"
     ;;
   stop)
     ansible "${COMMON_ARGS[@]}" \
-      --module-name ansible.builtin.systemd \
+      --module-name systemd \
       --args "name=spectral-line.service state=stopped enabled=false"
     ;;
   restart)
     ansible "${COMMON_ARGS[@]}" \
-      --module-name ansible.builtin.systemd \
+      --module-name systemd \
       --args "name=spectral-line.service state=restarted enabled=false"
     ;;
   status)
     ansible "${COMMON_ARGS[@]}" --one-line \
-      --module-name ansible.builtin.command \
+      --module-name command \
       --args "systemctl show spectral-line.service --property=ActiveState,SubState,MainPID --no-pager"
     ;;
   *)
