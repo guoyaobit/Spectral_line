@@ -149,6 +149,13 @@ installs `monitor/requirements.txt`, and renders the systemd units. The
 monitor is enabled and started, while the receiver remains disabled and
 stopped.
 
+`spectral-line.service` uses an immediate `SIGKILL` for stop operations and
+applies it to the complete service control group. This makes both
+`systemctl stop spectral-line` and `service-control.sh stop` terminate DPDK,
+CUDA, and result-sender threads without waiting for the former 20-second stop
+timeout. An in-progress baseband file may therefore end with an incomplete
+final block.
+
 After the build, the default executable path on every server is
 `/opt/Spectral_line/build/7mm`. `spectral-line.service` is not enabled at boot;
 start it only after the cluster's NIC, huge-page, input, and output paths have
@@ -173,10 +180,11 @@ ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml \
   -e spectral_line_observation_id=20260924T123015Z_M87_scan003
 ```
 
-Without this variable, deployment uses the `Observation_ID` stored in each
-server's static YAML file. Outside this static Ansible workflow the application
-also supports manual operation with the key omitted; all spectrum senders then
-use `obs_id=0`.
+Without this variable, deployment uses an active `Observation_ID` stored in
+each server's static YAML file. The supplied static files leave the example
+commented out by default, so deployment enters manual mode and all spectrum
+senders use `obs_id=0`. Uncomment the key only when the same value is also
+configured on Recorder.
 
 | Static file | ServerID | ETH0 input IPv4 | ETH0 ranges (MHz) | ETH1 input IPv4 | ETH1 ranges (MHz) |
 |---|---:|---|---|---|---|

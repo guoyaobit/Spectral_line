@@ -46,17 +46,22 @@
   set_fact:
     spectral_line_effective_observation_id: >-
       {{ spectral_line_observation_id |
-         default(spectral_line_static_config.Observation_ID) }}
+         default(spectral_line_static_config.Observation_ID | default('')) }}
 
 - name: Validate the static server configuration
   assert:
     that:
       - spectral_line_static_config.ServerID | int == spectral_line_effective_server_id | int
       - spectral_line_effective_observation_id is string
-      - spectral_line_effective_observation_id | length > 0
-      - spectral_line_effective_observation_id | length <= 64
-      - spectral_line_effective_observation_id is match('^[A-Za-z0-9._-]+$')
-      - spectral_line_effective_observation_id not in ['.', '..']
+      - >-
+        (spectral_line_effective_observation_id | length == 0) or
+        (spectral_line_effective_observation_id | length <= 64)
+      - >-
+        (spectral_line_effective_observation_id | length == 0) or
+        (spectral_line_effective_observation_id is match('^[A-Za-z0-9._-]+$'))
+      - >-
+        (spectral_line_effective_observation_id | length == 0) or
+        (spectral_line_effective_observation_id not in ['.', '..'])
       - spectral_line_static_config.subbands | length == 8
       - spectral_line_static_config.subbands | map(attribute='beam') | list ==
         ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B']
@@ -74,9 +79,9 @@
       - spectral_line_static_config.subbands[6].end_freq == spectral_line_static_config.subbands[7].end_freq
     fail_msg: >-
       {{ spectral_line_static_config_path }} must have the matching ServerID,
-      a safe 1-64 character Observation_ID, exactly eight subbands, the A/B
-      beam layout, GPU layout, matching A/B frequency ranges, and output ports
-      60000-60007.
+      an optional safe 1-64 character Observation_ID, exactly eight subbands,
+      the A/B beam layout, GPU layout, matching A/B frequency ranges, and
+      output ports 60000-60007.
 
 - name: Copy the static configuration to the server
   copy:
@@ -89,15 +94,18 @@
 - name: Apply the observation ID selected by the controller
   lineinfile:
     path: "{{ spectral_line_install_dir }}/config.yaml"
-    regexp: '^Observation_ID:'
+    regexp: '^\\s*#?\\s*Observation_ID:'
     line: "Observation_ID: {{ spectral_line_effective_observation_id }}"
     owner: "{{ spectral_line_service_user }}"
     group: "{{ spectral_line_service_user }}"
     mode: "0644"
+  when: spectral_line_effective_observation_id | length > 0
 
 - name: Report the selected static configuration
   debug:
     msg: >-
       {{ inventory_hostname }} ServerID={{ spectral_line_effective_server_id }}
-      Observation_ID={{ spectral_line_effective_observation_id }} uses
+      Observation_ID={{ spectral_line_effective_observation_id
+        if (spectral_line_effective_observation_id | length > 0)
+        else 'manual (obs_id=0)' }} uses
       {{ spectral_line_static_config_path }}

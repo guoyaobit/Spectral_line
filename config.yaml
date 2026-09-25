@@ -4,7 +4,7 @@ ServerID: 0
 # Optional. A controller sets the same unique value on every GPU node and the
 # Recorder. If omitted, spectrum results use obs_id=0 and baseband mode creates
 # an ISO-8601 basic UTC observation directory such as 20260925T143012.317Z.
-Observation_ID: 20260924T000000Z_example_scan001
+# Observation_ID: 20260924T000000Z_example_scan001
 # don't make the memory pool size > 128GB
 Memory_pool_per_stream: 8 # GB
 observation_mode: 1 # 0: baseband, 1: spectral line, 2: continuum

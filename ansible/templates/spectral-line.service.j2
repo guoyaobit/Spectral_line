@@ -15,8 +15,11 @@ ExecStart={{ spectral_line_install_dir }}/{{ spectral_line_build_dir }}/7mm
 StandardOutput=journal
 StandardError=journal
 Restart=no
-KillSignal=SIGTERM
-TimeoutStopSec=20
+# The receiver has no graceful signal shutdown path. Kill every worker
+# immediately so coordinated cluster stops do not wait on CUDA/DPDK threads.
+KillSignal=SIGKILL
+SendSIGKILL=yes
+TimeoutStopSec=2
 KillMode=control-group
 LimitMEMLOCK=infinity
 TasksMax=infinity
