@@ -136,36 +136,33 @@ def build_parser() -> argparse.ArgumentParser:
             "report loss, duplicates, or reordering."
         )
     )
-    parser.add_argument("count", nargs="?", type=int, help="packets to receive")
-    parser.add_argument("--bind-ip", default="10.17.16.11")
+    parser.add_argument("ip", nargs="?", help="local IPv4 address to bind")
     parser.add_argument(
-        "--port", dest="single_ports", action="append", type=int,
-        help="UDP port; repeat to monitor multiple ports",
+        "ports", nargs="?",
+        help="UDP port, comma-separated ports, or range (60000-60007)",
     )
     parser.add_argument(
-        "--ports", dest="port_specs", action="append", default=[],
-        help="comma-separated ports or inclusive ranges, e.g. 60000-60007",
+        "-n", "--count", type=int, default=125000,
+        help="packets to receive per port (default: 125000)",
     )
     parser.add_argument(
-        "--stream", type=int, default=0,
-        help="starting display label; increments across multiple ports",
+        "--size", dest="packet_bytes", type=int, default=DEFAULT_PACKET_BYTES
     )
     parser.add_argument(
-        "--packet-bytes", type=int, default=DEFAULT_PACKET_BYTES
-    )
-    parser.add_argument(
-        "--receive-buffer-bytes", type=int, default=16 * 1024 * 1024,
+        "--buffer", dest="receive_buffer_bytes", type=int,
+        default=16 * 1024 * 1024,
         help="requested SO_RCVBUF for each port",
     )
     parser.add_argument(
-        "--frames-per-second", type=int, default=DEFAULT_FRAMES_PER_SECOND
+        "--fps", dest="frames_per_second", type=int,
+        default=DEFAULT_FRAMES_PER_SECOND
     )
-    parser.add_argument("--timeout", type=float, default=None)
-    parser.add_argument("--expect-version", type=int)
-    parser.add_argument("--expect-edv", type=int)
-    parser.add_argument("--expect-thread-id", type=int)
+    parser.add_argument("-t", "--timeout", type=float, default=5.0)
+    parser.add_argument("--version", dest="expect_version", type=int)
+    parser.add_argument("--edv", dest="expect_edv", type=int)
+    parser.add_argument("--thread", dest="expect_thread_id", type=int)
     parser.add_argument(
-        "--print-every", type=int, default=0,
+        "-v", "--print-every", type=int, default=0,
         help="also print every Nth packet (zero disables)",
     )
     parser.add_argument(
@@ -213,7 +210,7 @@ def resolve_ports(
         for item in specification.split(","):
             item = item.strip()
             if not item:
-                raise ValueError("empty item in --ports")
+                raise ValueError("empty item in port list")
             if "-" in item:
                 start_text, end_text = item.split("-", 1)
                 start = int(start_text)
@@ -264,8 +261,8 @@ def check_expected(
     return problems
 
 
-def capture_port(args: argparse.Namespace, port: int, stream: int) -> int:
-    prefix = f"[{args.bind_ip}:{port}] "
+def capture_port(args: argparse.Namespace, port: int) -> int:
+    prefix = f"[{args.ip}:{port}] "
 
     def report(message: str, error: bool = False) -> None:
         print(
@@ -278,11 +275,10 @@ def capture_port(args: argparse.Namespace, port: int, stream: int) -> int:
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, args.receive_buffer_bytes)
     if args.timeout is not None:
         sock.settimeout(args.timeout)
-    sock.bind((args.bind_ip, port))
+    sock.bind((args.ip, port))
 
     report(
-        f"VDIF stream {stream}: listening on "
-        f"frames/s={args.frames_per_second}, "
+        f"listening: frames/s={args.frames_per_second}, "
         f"expected bytes={args.packet_bytes}, "
         f"SO_RCVBUF={sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)}"
     )
@@ -426,25 +422,25 @@ def run_capture(args: argparse.Namespace) -> int:
     if args.receive_buffer_bytes <= 0:
         raise ValueError("receive-buffer-bytes must be positive")
 
-    ports = resolve_ports(args.single_ports, args.port_specs)
+    if not args.ip or not args.ports:
+        raise ValueError("set both IP and port, for example: 10.17.16.11 60002")
+    ports = resolve_ports(None, [args.ports])
     if len(ports) == 1:
-        return capture_port(args, ports[0], args.stream)
+        return capture_port(args, ports[0])
     print(
-        f"Monitoring {len(ports)} UDP ports concurrently on {args.bind_ip}: "
+        f"Monitoring {len(ports)} UDP ports concurrently on {args.ip}: "
         + ", ".join(str(port) for port in ports),
         flush=True,
     )
-    work = [
-        (args, port, args.stream + index) for index, port in enumerate(ports)
-    ]
+    work = [(args, port) for port in ports]
     with ProcessPoolExecutor(max_workers=len(ports)) as executor:
         results = list(executor.map(capture_port_task, work))
     return int(any(results))
 
 
-def capture_port_task(item: Tuple[argparse.Namespace, int, int]) -> int:
-    args, port, stream = item
-    return capture_port(args, port, stream)
+def capture_port_task(item: Tuple[argparse.Namespace, int]) -> int:
+    args, port = item
+    return capture_port(args, port)
 
 
 def main() -> int:

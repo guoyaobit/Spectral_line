@@ -36,8 +36,7 @@ To validate the FPGA's live VDIF-over-UDP headers, packet length, 62500-frame
 cadence, and packet continuity without starting the DPDK receiver:
 
 ```sh
-python3 tests/check_vdif_udp.py 125000 \
-  --bind-ip 10.17.16.11 --port 60002 --stream 0 --timeout 5
+tests/check_vdif_udp.py 10.17.16.11 60002
 ```
 
 Monitor all eight ports on the same IP concurrently (the packet count applies
@@ -45,9 +44,12 @@ to each port independently). The checker uses one process and one receive
 socket per port so parsing can run on separate CPU cores:
 
 ```sh
-python3 tests/check_vdif_udp.py 125000 \
-  --bind-ip 10.17.16.11 --ports 60000-60007 --timeout 5
+tests/check_vdif_udp.py 10.17.16.11 60000-60007
 ```
+
+The default test receives 125000 packets (about two seconds) per port and
+stops a quiet port after five seconds. Override these only when needed, for
+example `-n 625000 -t 10`.
 
 At full FPGA line rate, Python and the kernel UDP stack may still become the
 bottleneck and report receiver-side loss. Use this tool for header/cadence
