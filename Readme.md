@@ -61,6 +61,10 @@ duplicate, or reordered frames, invalid flags, and a final summary. Use
 fields must have a specific value. Run its offline parser check with
 `python3 tests/check_vdif_udp.py --self-test`.
 
+The deployed FPGA's boundary value `frame=62500` is accepted as an alias for
+`frame=0` of the following second. It is normalized for UTC and boundary
+reporting; values greater than 62500 remain header errors.
+
 Install the monitor dependencies and start the continuous image generator:
 
 ```sh

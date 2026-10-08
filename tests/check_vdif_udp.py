@@ -92,6 +92,11 @@ def vdif_utc(
     frames_per_second: int,
 ) -> Tuple[dt.datetime, bool]:
     """Convert VDIF time to UTC; fold 23:59:60 onto 23:59:59."""
+    # The deployed FPGA may encode the first frame of a second as frame
+    # FRAMES_PER_SECOND attached to the preceding second. It has the same
+    # linear packet ID and timestamp as frame zero of the following second.
+    second_carry, frame_number = divmod(frame_number, frames_per_second)
+    seconds_from_epoch += second_carry
     start = epoch_start(reference_epoch)
     elapsed_leaps = 0
     leap_second = False
@@ -195,6 +200,10 @@ def self_test() -> int:
     timestamp, leap_second = vdif_utc(53, 0, 0, DEFAULT_FRAMES_PER_SECOND)
     assert timestamp == dt.datetime(2026, 7, 1, tzinfo=UTC)
     assert not leap_second
+    alias_timestamp, _ = vdif_utc(
+        53, 0, DEFAULT_FRAMES_PER_SECOND, DEFAULT_FRAMES_PER_SECOND
+    )
+    assert alias_timestamp == dt.datetime(2026, 7, 1, 0, 0, 1, tzinfo=UTC)
     assert resolve_ports([60002], ["60000-60001,60003"]) == [
         60002, 60000, 60001, 60003
     ]
@@ -235,10 +244,11 @@ def check_expected(
     header: VdifHeader, args: argparse.Namespace
 ) -> Sequence[str]:
     problems = []
-    if header.frame_number >= args.frames_per_second:
+    if header.frame_number > args.frames_per_second:
         problems.append(
             f"frame {header.frame_number} is outside 0.."
-            f"{args.frames_per_second - 1}"
+            f"{args.frames_per_second}; the upper value is accepted only "
+            "as the next-second frame-zero alias"
         )
     if header.frame_bytes != args.packet_bytes:
         problems.append(
@@ -361,19 +371,32 @@ def capture_port(args: argparse.Namespace, port: int) -> int:
             previous_packet_id = packet_id
             last_header = header
 
-            if header.frame_number in (0, args.frames_per_second - 1):
-                boundary = "start" if header.frame_number == 0 else "end"
+            normalized_second = (
+                header.seconds_from_epoch
+                + header.frame_number // args.frames_per_second
+            )
+            normalized_frame = header.frame_number % args.frames_per_second
+            if (
+                header.frame_number <= args.frames_per_second
+                and normalized_frame in (0, args.frames_per_second - 1)
+            ):
+                boundary = "start" if normalized_frame == 0 else "end"
+                frame_text = str(normalized_frame)
+                if header.frame_number == args.frames_per_second:
+                    frame_text += (
+                        f" (raw={header.frame_number}, next-second alias)"
+                    )
                 report(
                     f"second {boundary}: UTC="
                     f"{format_utc(header, args.frames_per_second)}, "
-                    f"packet={received}, frame={header.frame_number}"
+                    f"packet={received}, frame={frame_text}"
                 )
-                if header.frame_number == 0:
+                if normalized_frame == 0:
                     second_start_packet = received
-                    second_start_value = header.seconds_from_epoch
+                    second_start_value = normalized_second
                 elif (
                     second_start_packet is not None
-                    and second_start_value == header.seconds_from_epoch
+                    and second_start_value == normalized_second
                 ):
                     report(
                         "complete-second capture count: "
