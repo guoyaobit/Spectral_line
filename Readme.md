@@ -8,6 +8,11 @@ baseband files.
 See [docs/deployment.md](docs/deployment.md) for host preparation, build,
 configuration, and start-up checks.
 
+See [docs/result-data-format.md](docs/result-data-format.md) for the exact
+ZeroMQ result-message layout, header fields, CRC32C coverage, spectrum and
+continuum payload definitions, frequency coordinates, and receiver validation
+rules.
+
 Each of the two 100G DPDK interfaces receives UDP destination ports
 `60000–60007`. Ports `60000/60001` carry X/Y polarisation for one subband,
 `60002/60003` carry the next subband, and so on through `60006/60007`. DPDK

@@ -34,6 +34,11 @@ outgoing result destination ZeroMQ/TCP port on `Storage_node_ip`. It is
 independent of the fixed 100G input-port mapping above and is not a local
 source port. The sender does not install a static ARP entry.
 
+The binary result protocol is documented in
+[result-data-format.md](result-data-format.md), including the packed headers,
+CRC32C coverage, spectral/continuum payloads, and the receiver-side identity
+and length checks.
+
 ## Host prerequisites
 
 - Linux with a C++17 compiler, Meson and Ninja.
