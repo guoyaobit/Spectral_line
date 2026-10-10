@@ -87,9 +87,13 @@ def calculate_old_spectrum(
         stats,
         frames_per_second,
         max_frames,
-        require_complex=False,
-        require_single_channel=False,
+        frame_length_includes_header=False,
     ):
+        if header.bits_per_sample != 8:
+            raise ValueError(
+                f"old Q,I reader requires 8-bit components; VDIF header "
+                f"declares {header.bits_per_sample} bits"
+            )
         if first_header is None:
             first_header = header
 

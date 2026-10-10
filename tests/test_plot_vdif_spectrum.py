@@ -45,6 +45,19 @@ class VdifSpectrumTest(unittest.TestCase):
         self.assertEqual(header.frame_bytes, 4128)
         self.assertTrue(header.complex_data)
 
+    def test_standard_word0_flag_positions(self):
+        invalid_words = list(struct.unpack("<8I", make_header(8, 8192)))
+        invalid_words[0] = (1 << 31) | 42
+        invalid = MODULE.parse_vdif_header(struct.pack("<8I", *invalid_words))
+        self.assertTrue(invalid.invalid)
+        self.assertFalse(invalid.legacy)
+
+        legacy_words = invalid_words.copy()
+        legacy_words[0] = (1 << 30) | 42
+        legacy = MODULE.parse_vdif_header(struct.pack("<8I", *legacy_words))
+        self.assertFalse(legacy.invalid)
+        self.assertTrue(legacy.legacy)
+
     def test_spectrum_finds_complex_tone(self):
         sample_rate = 256e6
         nfft = 4096

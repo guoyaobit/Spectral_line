@@ -23,12 +23,10 @@ def make_header(payload_bytes, frame_number=0):
     words = [0] * 8
     words[0] = 42
     words[1] = (53 << 24) | frame_number
-    # The old recorder could leave the VDIF channel-count field at a bogus
-    # value (30 here) even though the payload is one Q,I stream.
-    words[2] = (30 << 24) | ((32 + payload_bytes) // 8)
-    # Old files contain Q,I complex pairs even though the VDIF complex-data
-    # flag (bit 31) was not set.
-    words[3] = (7 << 26) | (9 << 16)
+    # Before c5eb8de the recorder incorrectly put only the payload length in
+    # the VDIF frame-length field, rather than header + payload.
+    words[2] = (1 << 29) | (payload_bytes // 8)
+    words[3] = (1 << 31) | (7 << 26) | (9 << 16)
     words[4] = 1 << 24
     return struct.pack("<8I", *words)
 

@@ -124,6 +124,7 @@ def iter_vdif_frames(
     max_frames: int | None,
     require_complex: bool = True,
     require_single_channel: bool = True,
+    frame_length_includes_header: bool = True,
 ) -> Iterator[tuple[VdifHeader, bytes]]:
     expected_format: tuple[int, bool, int] | None = None
     previous_packet_id: int | None = None
@@ -143,7 +144,10 @@ def iter_vdif_frames(
                 header = parse_vdif_header(header_data)
                 if header.legacy:
                     raise ValueError(f"{path}: legacy 16-byte VDIF headers are unsupported")
-                if header.frame_bytes < VDIF_HEADER_BYTES:
+                minimum_frame_bytes = (
+                    VDIF_HEADER_BYTES if frame_length_includes_header else 1
+                )
+                if header.frame_bytes < minimum_frame_bytes:
                     raise ValueError(
                         f"{path}: invalid VDIF frame length {header.frame_bytes}"
                     )
@@ -155,7 +159,12 @@ def iter_vdif_frames(
                         f"2^{header.log2_channels} channels"
                     )
 
-                payload_bytes = header.frame_bytes - VDIF_HEADER_BYTES
+                # Standard VDIF stores the complete frame length.  Files from
+                # the receiver before c5eb8de stored only the payload length in
+                # this field; the old-format reader selects that convention.
+                payload_bytes = header.frame_bytes
+                if frame_length_includes_header:
+                    payload_bytes -= VDIF_HEADER_BYTES
                 payload = stream.read(payload_bytes)
                 stats.frames_read += 1
                 if len(payload) != payload_bytes:
