@@ -358,7 +358,12 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("input", nargs="+", type=pathlib.Path)
-    parser.add_argument("-o", "--output", type=pathlib.Path)
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        help="output plot; use .svg or .pdf for lossless zoom",
+    )
     parser.add_argument("--csv", type=pathlib.Path, help="also write spectrum CSV")
     parser.add_argument(
         "--sample-rate-hz", type=float, default=DEFAULT_SAMPLE_RATE_HZ

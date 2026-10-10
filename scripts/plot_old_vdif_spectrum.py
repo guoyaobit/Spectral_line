@@ -140,7 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("input", nargs="+", type=pathlib.Path)
-    parser.add_argument("-o", "--output", type=pathlib.Path)
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        help="output plot; use .svg or .pdf for lossless zoom",
+    )
     parser.add_argument("--csv", type=pathlib.Path, help="also write spectrum CSV")
     parser.add_argument(
         "--encoding",
@@ -183,7 +188,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if missing:
         parser.error("input file not found: " + ", ".join(missing))
 
-    output = args.output or args.input[0].with_suffix(".old-spectrum.png")
+    output = args.output or args.input[0].with_suffix(".spectrum.png")
     max_frames = None if args.max_frames == 0 else args.max_frames
     try:
         result = calculate_old_spectrum(
@@ -200,7 +205,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             output,
             args.center_frequency_hz,
             args.sideband,
-            args.title or "Old-format VDIF Q,I baseband spectrum",
+            args.title or "VDIF Q,I baseband spectrum",
         )
         if args.csv:
             write_csv(
