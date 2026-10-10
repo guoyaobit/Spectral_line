@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import dataclasses
+import html
 import pathlib
 import struct
 import sys
@@ -298,6 +299,12 @@ def plot_spectrum(
     sideband: str,
     title: str | None,
 ) -> None:
+    if output.suffix.lower() == ".html":
+        write_interactive_html(
+            result, output, center_frequency_hz, sideband, title
+        )
+        return
+
     try:
         import matplotlib
     except ModuleNotFoundError as error:
@@ -333,6 +340,228 @@ def plot_spectrum(
     plt.close(figure)
 
 
+def _javascript_number_array(values: np.ndarray) -> str:
+    return ",".join(f"{float(value):.9g}" for value in values)
+
+
+def write_interactive_html(
+    result: SpectrumResult,
+    output: pathlib.Path,
+    center_frequency_hz: float | None,
+    sideband: str,
+    title: str | None,
+) -> None:
+    frequency_mhz, xlabel = frequency_axis(
+        result.frequency_hz, center_frequency_hz, sideband
+    )
+    order = np.argsort(frequency_mhz)
+    x = np.asarray(frequency_mhz[order], dtype=np.float64)
+    y = np.asarray(result.psd_dbfs_hz[order], dtype=np.float64)
+    finite = np.isfinite(x) & np.isfinite(y)
+    x = x[finite]
+    y = y[finite]
+    if x.size < 2:
+        raise ValueError("interactive spectrum needs at least two finite points")
+
+    visible_title = html.escape(title or "VDIF complex baseband spectrum")
+    visible_xlabel = html.escape(xlabel)
+    metadata = html.escape(
+        f"{result.bits_per_sample}-bit · thread {result.thread_id} · "
+        f"{result.averages} FFT averages"
+    )
+    template = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; padding: 20px; background: Canvas; color: CanvasText; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 8px; }
+  h1 { margin: 0; font-size: 20px; font-weight: 500; }
+  .meta, .hint { color: GrayText; font-size: 13px; }
+  button { font: inherit; padding: 5px 10px; }
+  .chart { position: relative; width: 100%; }
+  canvas { display: block; width: 100%; height: min(72vh, 720px); min-height: 420px; touch-action: none; }
+  .tooltip { position: absolute; display: none; pointer-events: none; padding: 6px 8px;
+    border: 1px solid GrayText; border-radius: 4px; background: Canvas; color: CanvasText;
+    font-size: 12px; white-space: nowrap; box-shadow: 0 2px 8px rgb(0 0 0 / 20%); }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <h1>__TITLE__</h1>
+  <span class="meta">__META__</span>
+  <button id="reset" type="button">Reset view</button>
+</div>
+<div class="hint">Mouse wheel: zoom frequency · drag: pan · hover: inspect</div>
+<div class="chart" id="chart">
+  <canvas id="spectrum" aria-label="Interactive VDIF power spectrum"></canvas>
+  <div class="tooltip" id="tooltip" role="status"></div>
+</div>
+<script>
+(() => {
+  "use strict";
+  const xs = [__X_DATA__];
+  const ys = [__Y_DATA__];
+  const xLabel = "__X_LABEL__";
+  const yLabel = "Power spectral density (dBFS/Hz)";
+  const canvas = document.getElementById("spectrum");
+  const tooltip = document.getElementById("tooltip");
+  const ctx = canvas.getContext("2d");
+  const fullMin = xs[0], fullMax = xs[xs.length - 1];
+  let viewMin = fullMin, viewMax = fullMax;
+  let dragging = false, dragStartX = 0, dragMin = 0, dragMax = 0;
+  let width = 0, height = 0, pendingDraw = false;
+  const margin = { left: 82, right: 24, top: 32, bottom: 66 };
+  let yMin = Infinity, yMax = -Infinity;
+  for (const value of ys) { yMin = Math.min(yMin, value); yMax = Math.max(yMax, value); }
+  const yPad = Math.max((yMax - yMin) * 0.05, 1);
+  yMin -= yPad; yMax += yPad;
+
+  function colors() {
+    return matchMedia("(prefers-color-scheme: dark)").matches
+      ? { fg: "#e8e8e8", muted: "#a8a8a8", grid: "#444", line: "#6bb6ff", bg: "#121212" }
+      : { fg: "#202020", muted: "#666", grid: "#d8d8d8", line: "#1769aa", bg: "#fff" };
+  }
+  function plotWidth() { return width - margin.left - margin.right; }
+  function plotHeight() { return height - margin.top - margin.bottom; }
+  function xToPixel(value) { return margin.left + (value - viewMin) / (viewMax - viewMin) * plotWidth(); }
+  function pixelToX(value) { return viewMin + (value - margin.left) / plotWidth() * (viewMax - viewMin); }
+  function yToPixel(value) { return margin.top + (yMax - value) / (yMax - yMin) * plotHeight(); }
+  function lowerBound(value) {
+    let lo = 0, hi = xs.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (xs[mid] < value) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+  function clampView() {
+    const span = viewMax - viewMin;
+    if (span >= fullMax - fullMin) { viewMin = fullMin; viewMax = fullMax; return; }
+    if (viewMin < fullMin) { viewMin = fullMin; viewMax = fullMin + span; }
+    if (viewMax > fullMax) { viewMax = fullMax; viewMin = fullMax - span; }
+  }
+  function tickText(value, span) {
+    if (span < 0.01) return value.toFixed(6);
+    if (span < 1) return value.toFixed(4);
+    return value.toFixed(2);
+  }
+  function drawAxes(c) {
+    ctx.strokeStyle = c.grid; ctx.fillStyle = c.muted; ctx.lineWidth = 1; ctx.font = "12px system-ui";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const xTicks = Math.max(3, Math.min(8, Math.floor(plotWidth() / 100)));
+    for (let n = 0; n <= xTicks; n++) {
+      const px = margin.left + n / xTicks * plotWidth();
+      const value = viewMin + n / xTicks * (viewMax - viewMin);
+      ctx.beginPath(); ctx.moveTo(px, margin.top); ctx.lineTo(px, height - margin.bottom); ctx.stroke();
+      ctx.fillText(tickText(value, viewMax - viewMin), px, height - margin.bottom + 8);
+    }
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let n = 0; n <= 6; n++) {
+      const py = margin.top + n / 6 * plotHeight();
+      const value = yMax - n / 6 * (yMax - yMin);
+      ctx.beginPath(); ctx.moveTo(margin.left, py); ctx.lineTo(width - margin.right, py); ctx.stroke();
+      ctx.fillText(value.toFixed(1), margin.left - 8, py);
+    }
+    ctx.fillStyle = c.fg; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.fillText(xLabel, margin.left + plotWidth() / 2, height - 4);
+    ctx.save(); ctx.translate(16, margin.top + plotHeight() / 2); ctx.rotate(-Math.PI / 2);
+    ctx.fillText(yLabel, 0, 0); ctx.restore();
+    ctx.strokeStyle = c.fg; ctx.strokeRect(margin.left, margin.top, plotWidth(), plotHeight());
+  }
+  function drawSeries(c) {
+    const start = Math.max(0, lowerBound(viewMin) - 1);
+    const end = Math.min(xs.length, lowerBound(viewMax) + 1);
+    ctx.save(); ctx.beginPath(); ctx.rect(margin.left, margin.top, plotWidth(), plotHeight()); ctx.clip();
+    ctx.strokeStyle = c.line; ctx.lineWidth = 1; ctx.beginPath();
+    if (end - start <= plotWidth() * 2) {
+      for (let i = start; i < end; i++) {
+        const px = xToPixel(xs[i]), py = yToPixel(ys[i]);
+        if (i === start) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+    } else {
+      for (let pixel = 0; pixel < plotWidth(); pixel++) {
+        const xa = pixelToX(margin.left + pixel), xb = pixelToX(margin.left + pixel + 1);
+        const i0 = Math.max(start, lowerBound(xa));
+        const i1 = Math.min(end, Math.max(i0 + 1, lowerBound(xb)));
+        let lo = Infinity, hi = -Infinity;
+        for (let i = i0; i < i1; i++) { lo = Math.min(lo, ys[i]); hi = Math.max(hi, ys[i]); }
+        if (Number.isFinite(lo)) { const px = margin.left + pixel + 0.5; ctx.moveTo(px, yToPixel(lo)); ctx.lineTo(px, yToPixel(hi)); }
+      }
+    }
+    ctx.stroke(); ctx.restore();
+  }
+  function draw() {
+    pendingDraw = false; const c = colors();
+    ctx.clearRect(0, 0, width, height); ctx.fillStyle = c.bg; ctx.fillRect(0, 0, width, height);
+    drawAxes(c); drawSeries(c);
+  }
+  function queueDraw() { if (!pendingDraw) { pendingDraw = true; requestAnimationFrame(draw); } }
+  function resize() {
+    const rect = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    width = Math.max(320, rect.width); height = Math.max(420, rect.height);
+    canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); queueDraw();
+  }
+  function pointerPosition(event) { const r = canvas.getBoundingClientRect(); return { x: event.clientX - r.left, y: event.clientY - r.top }; }
+  function hideTooltip() { tooltip.style.display = "none"; }
+  function showHover(event) {
+    const p = pointerPosition(event);
+    if (p.x < margin.left || p.x > width - margin.right || p.y < margin.top || p.y > height - margin.bottom) { hideTooltip(); return; }
+    const target = pixelToX(p.x); let index = lowerBound(target);
+    if (index >= xs.length) index = xs.length - 1;
+    if (index > 0 && Math.abs(xs[index - 1] - target) < Math.abs(xs[index] - target)) index--;
+    draw(); const c = colors(), px = xToPixel(xs[index]), py = yToPixel(ys[index]);
+    ctx.strokeStyle = c.muted; ctx.beginPath(); ctx.moveTo(px, margin.top); ctx.lineTo(px, height - margin.bottom); ctx.stroke();
+    ctx.fillStyle = c.line; ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
+    tooltip.textContent = `Frequency: ${xs[index].toFixed(6)} MHz · PSD: ${ys[index].toFixed(2)} dBFS/Hz`;
+    tooltip.style.display = "block";
+    const tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+    tooltip.style.left = `${Math.min(width - tw - 4, Math.max(4, p.x + 12))}px`;
+    tooltip.style.top = `${Math.min(height - th - 4, Math.max(4, p.y - th - 10))}px`;
+  }
+  canvas.addEventListener("wheel", event => {
+    if (event.ctrlKey) return;
+    event.preventDefault(); hideTooltip();
+    const p = pointerPosition(event), center = pixelToX(Math.min(width - margin.right, Math.max(margin.left, p.x)));
+    const oldSpan = viewMax - viewMin, fullSpan = fullMax - fullMin;
+    const newSpan = Math.min(fullSpan, Math.max(fullSpan / 1e6, oldSpan * Math.exp(event.deltaY * 0.0015)));
+    const ratio = (center - viewMin) / oldSpan;
+    viewMin = center - ratio * newSpan; viewMax = viewMin + newSpan; clampView(); queueDraw();
+  }, { passive: false });
+  canvas.addEventListener("pointerdown", event => {
+    const p = pointerPosition(event); dragging = true; dragStartX = p.x; dragMin = viewMin; dragMax = viewMax;
+    canvas.setPointerCapture(event.pointerId); hideTooltip();
+  });
+  canvas.addEventListener("pointermove", event => {
+    if (!dragging) { showHover(event); return; }
+    const p = pointerPosition(event), shift = -(p.x - dragStartX) / plotWidth() * (dragMax - dragMin);
+    viewMin = dragMin + shift; viewMax = dragMax + shift; clampView(); queueDraw();
+  });
+  function stopDrag(event) { if (dragging) { dragging = false; canvas.releasePointerCapture(event.pointerId); } }
+  canvas.addEventListener("pointerup", stopDrag); canvas.addEventListener("pointercancel", stopDrag);
+  canvas.addEventListener("pointerleave", () => { if (!dragging) hideTooltip(); });
+  canvas.addEventListener("dblclick", () => { viewMin = fullMin; viewMax = fullMax; hideTooltip(); queueDraw(); });
+  document.getElementById("reset").addEventListener("click", () => { viewMin = fullMin; viewMax = fullMax; hideTooltip(); queueDraw(); });
+  new ResizeObserver(resize).observe(canvas);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", queueDraw);
+  resize();
+})();
+</script>
+</body>
+</html>
+"""
+    document = (
+        template.replace("__TITLE__", visible_title)
+        .replace("__META__", metadata)
+        .replace("__X_LABEL__", visible_xlabel)
+        .replace("__X_DATA__", _javascript_number_array(x))
+        .replace("__Y_DATA__", _javascript_number_array(y))
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(document, encoding="utf-8")
+
+
 def write_csv(
     path: pathlib.Path,
     result: SpectrumResult,
@@ -354,7 +583,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Decode this receiver's 8/4/2-bit complex VDIF baseband files, "
-            "average FFT power spectra, and write a PNG plot."
+            "average FFT power spectra, and write an interactive HTML plot."
         )
     )
     parser.add_argument("input", nargs="+", type=pathlib.Path)
@@ -362,7 +591,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         type=pathlib.Path,
-        help="output plot; use .svg or .pdf for lossless zoom",
+        help="output plot (default: interactive .html; .svg/.pdf/.png are static)",
     )
     parser.add_argument("--csv", type=pathlib.Path, help="also write spectrum CSV")
     parser.add_argument(
@@ -419,7 +648,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.frames_per_second <= 0:
         parser.error("--frames-per-second must be positive")
 
-    output = args.output or args.input[0].with_suffix(".spectrum.svg")
+    output = args.output or args.input[0].with_suffix(".spectrum.html")
     max_frames = None if args.max_frames == 0 else args.max_frames
     try:
         result = calculate_spectrum(

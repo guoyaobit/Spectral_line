@@ -144,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         type=pathlib.Path,
-        help="output plot; use .svg or .pdf for lossless zoom",
+        help="output plot (default: interactive .html; .svg/.pdf/.png are static)",
     )
     parser.add_argument("--csv", type=pathlib.Path, help="also write spectrum CSV")
     parser.add_argument(
@@ -188,7 +188,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if missing:
         parser.error("input file not found: " + ", ".join(missing))
 
-    output = args.output or args.input[0].with_suffix(".spectrum.svg")
+    output = args.output or args.input[0].with_suffix(".spectrum.html")
     max_frames = None if args.max_frames == 0 else args.max_frames
     try:
         result = calculate_old_spectrum(

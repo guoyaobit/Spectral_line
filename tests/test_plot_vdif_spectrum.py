@@ -71,12 +71,21 @@ class VdifSpectrumTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "tone.vdif"
             plot_path = pathlib.Path(directory) / "tone.png"
+            interactive_path = pathlib.Path(directory) / "tone.html"
             with path.open("wb") as stream:
                 stream.write(make_header(8, len(payload)))
                 stream.write(payload)
             result = MODULE.calculate_spectrum(
                 [path], sample_rate_hz=sample_rate, nfft=nfft, max_frames=None
             )
+            MODULE.plot_spectrum(
+                result, interactive_path, None, "upper", "Test spectrum"
+            )
+            interactive = interactive_path.read_text(encoding="utf-8")
+            self.assertIn("Mouse wheel: zoom frequency", interactive)
+            self.assertIn('canvas.addEventListener("wheel"', interactive)
+            self.assertIn('canvas.addEventListener("pointerdown"', interactive)
+            self.assertIn("Frequency:", interactive)
             if importlib.util.find_spec("matplotlib") is not None:
                 MODULE.plot_spectrum(result, plot_path, None, "upper", None)
                 self.assertGreater(plot_path.stat().st_size, 1000)
