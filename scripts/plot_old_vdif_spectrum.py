@@ -188,7 +188,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if missing:
         parser.error("input file not found: " + ", ".join(missing))
 
-    output = args.output or args.input[0].with_suffix(".spectrum.png")
+    output = args.output or args.input[0].with_suffix(".spectrum.svg")
     max_frames = None if args.max_frames == 0 else args.max_frames
     try:
         result = calculate_old_spectrum(
