@@ -123,6 +123,7 @@ def iter_vdif_frames(
     frames_per_second: int,
     max_frames: int | None,
     require_complex: bool = True,
+    require_single_channel: bool = True,
 ) -> Iterator[tuple[VdifHeader, bytes]]:
     expected_format: tuple[int, bool, int] | None = None
     previous_packet_id: int | None = None
@@ -148,7 +149,7 @@ def iter_vdif_frames(
                     )
                 if require_complex and not header.complex_data:
                     raise ValueError(f"{path}: VDIF frame is not marked as complex data")
-                if header.log2_channels != 0:
+                if require_single_channel and header.log2_channels != 0:
                     raise ValueError(
                         f"{path}: expected one channel, header declares "
                         f"2^{header.log2_channels} channels"

@@ -23,7 +23,9 @@ def make_header(payload_bytes, frame_number=0):
     words = [0] * 8
     words[0] = 42
     words[1] = (53 << 24) | frame_number
-    words[2] = (1 << 29) | ((32 + payload_bytes) // 8)
+    # The old recorder could leave the VDIF channel-count field at a bogus
+    # value (30 here) even though the payload is one Q,I stream.
+    words[2] = (30 << 24) | ((32 + payload_bytes) // 8)
     # Old files contain Q,I complex pairs even though the VDIF complex-data
     # flag (bit 31) was not set.
     words[3] = (7 << 26) | (9 << 16)
@@ -66,6 +68,7 @@ class OldVdifSpectrumTest(unittest.TestCase):
         peak_hz = result.frequency_hz[np.argmax(result.psd_dbfs_hz)]
         self.assertAlmostEqual(peak_hz, tone_bin * sample_rate / nfft)
         self.assertEqual(result.stats.frames_used, 1)
+        self.assertEqual(result.bits_per_sample, 8)
 
 
 if __name__ == "__main__":
