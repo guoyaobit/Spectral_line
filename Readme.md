@@ -108,3 +108,13 @@ for the systemd installation steps.
 When every changed stream in a scan has rendered successfully, the service
 atomically replaces `/dev/shm/monitor_plots/manifest.json`. A failed render
 leaves the previous manifest unchanged and is retried on the next scan.
+
+## Local SDFITS copy
+
+Spectral-line mode can also save completed integrations on each processing
+node while continuing to transmit them to `Spectral_Line_Recorder`. Enable the
+`local_sdfits` block in `config.yaml`; local files use the same SDFITS template,
+binary-table columns, TDIM order, Stokes payload, noise-state field, and
+filename convention as Recorder output. See
+[`docs/local-sdfits.md`](docs/local-sdfits.md) for configuration and operational
+details.

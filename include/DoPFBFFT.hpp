@@ -12,6 +12,7 @@
 #include <cmath>
 #include <thread>
 #include <Globalcfg.hpp>
+#include <LocalSdfitsWriter.hpp>
 #include <timing.hpp>
 #include <cuda_fp16.h>
 #include <string>
@@ -379,6 +380,16 @@ public:
             m_config->windows[i]->header.timestamp_ns =
                 compensated_center_ns;
             m_config->windows[i]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
+            if (!LocalSdfitsWriter::instance().enqueue(
+                    m_config->windows[i]->header, &slot.data[start_idx],
+                    channels * sizeof(float4))) {
+              cfg.logger_->error(
+                  "Dropped local SDFITS row: subband={}, window={}, "
+                  "integration={} (queue full or invalid payload)",
+                  m_config->windows[i]->header.subband_id,
+                  m_config->windows[i]->header.window_id,
+                  m_config->windows[i]->header.integration_id);
+            }
             if (!m_config->windows[i]->sender.send_spectrum(
                     m_config->windows[i]->header, &slot.data[start_idx],
                     channels * sizeof(float4))) {

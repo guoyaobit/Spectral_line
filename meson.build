@@ -18,6 +18,7 @@ spdlog_dep = dependency('spdlog', required: true)
 yaml_dep = dependency('yaml-cpp', required: true)
 fmt_dep = dependency('fmt', required: true)
 zmq_dep = dependency('libzmq', required: true)
+cfitsio_dep = dependency('cfitsio', required: true)
 
 cuda = meson.get_compiler('cuda')
 
@@ -45,6 +46,8 @@ executable(
     [
         'src/main.cu',
         'src/init.cu',
+        'src/LocalSdfitsWriter.cpp',
+        'src/sdfits.cpp',
     ],
     include_directories: inc,
     dependencies: [
@@ -55,6 +58,7 @@ executable(
         spdlog_dep,
         fmt_dep,
         zmq_dep,
+        cfitsio_dep,
     ],
     link_with: dpdk_lib,
 )

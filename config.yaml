@@ -29,6 +29,14 @@ Baseband_Folder1: /data1
 # baseband_bits 8,4,2
 Baseband_bits: 8
 subband_monitor: true
+# Optional local copy of the spectral-line output. The generated SDFITS uses
+# the same template, headers, columns and DATA layout as Spectral_Line_Recorder.
+local_sdfits:
+  enabled: false
+  storage_folder: /data
+  object: test
+  source_on: true
+  queue_mb: 2048
 subbands:
   # Every `port` value below is the destination ZeroMQ/TCP port on Storage_node_ip
   # used to send the processed spectrum result. Values may be arbitrary TCP

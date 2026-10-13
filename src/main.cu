@@ -1,4 +1,5 @@
 #include <Globalcfg.hpp>
+#include <LocalSdfitsWriter.hpp>
 #include <cerrno>
 #include <cstring>
 #include <inttypes.h>
@@ -42,6 +43,9 @@ int main() {
     if (!cfg.initFromYaml("config.yaml")) {
       return 1;
     }
+    LocalSdfitsWriter::instance().configure(
+        cfg.local_sdfits_enabled, cfg.local_sdfits_folder,
+        cfg.local_sdfits_queue_bytes);
     remove_stale_monitor_files(cfg);
     if (cfg.observation_mode == ObservationMode::BASEBAND) {
       if (cfg.Baseband_bits == 8) {

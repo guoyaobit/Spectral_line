@@ -142,6 +142,11 @@ public:
   std::string Baseband_folder1;
   int Baseband_bits = 8;
   bool subband_monitor = false; // Publish recent frames for monitoring
+  bool local_sdfits_enabled = false;
+  std::string local_sdfits_folder = "/data";
+  std::string local_sdfits_object;
+  bool local_sdfits_source_on = true;
+  size_t local_sdfits_queue_bytes = 2048ULL * 1024ULL * 1024ULL;
   // Packets in one FFT interval.
   int batchsize() const { return total_nfft / 4096; }
   // Duration of one FFT interval.
@@ -227,11 +232,58 @@ public:
             "Observation_ID is not configured; using manual mode with "
             "spectrum obs_id=0");
       }
+      if (config["observation_mode"])
+        observation_mode = parseObservationMode(config["observation_mode"]);
+      const YAML::Node local_sdfits = config["local_sdfits"];
+      if (local_sdfits) {
+        if (!local_sdfits.IsMap())
+          throw std::runtime_error("local_sdfits must be a mapping");
+        if (local_sdfits["enabled"])
+          local_sdfits_enabled = local_sdfits["enabled"].as<bool>();
+        if (local_sdfits_enabled) {
+          if (observation_mode != ObservationMode::SPECTRAL)
+            throw std::runtime_error(
+                "local_sdfits is supported only in spectral-line mode");
+          local_sdfits_folder = "/data";
+          if (local_sdfits["storage_folder"]) {
+            if (!local_sdfits["storage_folder"].IsScalar())
+              throw std::runtime_error(
+                  "local_sdfits.storage_folder must be a scalar");
+            local_sdfits_folder =
+                local_sdfits["storage_folder"].as<std::string>();
+          }
+          if (local_sdfits_folder.empty())
+            throw std::runtime_error(
+                "local_sdfits.storage_folder must not be empty");
+          if (local_sdfits["object"])
+            local_sdfits_object = local_sdfits["object"].as<std::string>();
+          if (local_sdfits["source_on"])
+            local_sdfits_source_on = local_sdfits["source_on"].as<bool>();
+          size_t queue_mb = 2048;
+          if (local_sdfits["queue_mb"])
+            queue_mb = local_sdfits["queue_mb"].as<size_t>();
+          if (queue_mb == 0 || queue_mb > 16384)
+            throw std::runtime_error(
+                "local_sdfits.queue_mb must be between 1 and 16384");
+          local_sdfits_queue_bytes = queue_mb * 1024ULL * 1024ULL;
+
+          const std::string directory =
+              Observation_ID.empty()
+                  ? automatic_observation_directory_id(
+                        local_sdfits_object,
+                        local_sdfits_source_on ? "ON" : "OFF")
+                  : Observation_ID;
+          local_sdfits_folder =
+              (std::filesystem::path(local_sdfits_folder) / directory)
+                  .string();
+          std::filesystem::create_directories(local_sdfits_folder);
+          logger_->info("Local SDFITS output directory: {}",
+                        local_sdfits_folder);
+        }
+      }
       if (config["Memory_pool_per_stream"])
         Memory_pool_per_stream =
             config["Memory_pool_per_stream"].as<size_t>(); // GB
-      if (config["observation_mode"])
-        observation_mode = parseObservationMode(config["observation_mode"]);
       if (config["Storage_node_ip"] && config["Storage_node_ip"].IsScalar()) {
         Storage_node_ip = config["Storage_node_ip"].as<std::string>();
       } else {
