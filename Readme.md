@@ -118,3 +118,5 @@ binary-table columns, TDIM order, Stokes payload, noise-state field, and
 filename convention as Recorder output. See
 [`docs/local-sdfits.md`](docs/local-sdfits.md) for configuration and operational
 details.
+
+Developer: YAO GUO, Institute of Automation, Chinese Academy of Sciences.

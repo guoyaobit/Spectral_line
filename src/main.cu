@@ -1,3 +1,5 @@
+// Developer: YAO GUO, Institute of Automation, Chinese Academy of Sciences.
+
 #include <Globalcfg.hpp>
 #include <LocalSdfitsWriter.hpp>
 #include <cerrno>
