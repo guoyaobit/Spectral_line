@@ -379,6 +379,8 @@ public:
             // Use the midpoint of the accumulated FFT intervals.
             m_config->windows[i]->header.timestamp_ns =
                 compensated_center_ns;
+            m_config->windows[i]->header.integration_start_ns =
+                compensate_delay_ns(slot.first_timestamp_ns, pfb_delay_ns);
             m_config->windows[i]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
             if (!LocalSdfitsWriter::instance().enqueue(
                     m_config->windows[i]->header, &slot.data[start_idx],
@@ -401,6 +403,8 @@ public:
       if( cfg.observation_mode == ObservationMode::CONTINUUM) {
             m_config->windows[0]->header.timestamp_ns =
                 compensated_center_ns;
+            m_config->windows[0]->header.integration_start_ns =
+                compensate_delay_ns(slot.first_timestamp_ns, pfb_delay_ns);
             m_config->windows[0]->header.noise_state = static_cast<uint32_t>(slot.noise_state);
             if (!m_config->windows[0]->sender.send_spectrum(
                     m_config->windows[0]->header, &slot.sumPower,

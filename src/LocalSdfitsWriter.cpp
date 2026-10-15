@@ -2,6 +2,7 @@
 
 #include <Globalcfg.hpp>
 #include <sdfits.h>
+#include <SdfitsMetadata.hpp>
 #include <time_utils.h>
 
 #include <cmath>
@@ -103,7 +104,7 @@ sdfits *LocalSdfitsWriter::get_or_create_writer(
       static_cast<unsigned>(header.subband_id),
       static_cast<unsigned>(header.window_id), header.start_freq_hz / 1e6,
       stop_freq_hz / 1e6, beam_name,
-      GlobalConfig::getInstance().local_sdfits_source_on ? "ON" : "OFF",
+      GlobalConfig::getInstance().source_on ? "ON" : "OFF",
       static_cast<unsigned>(header.n_channels));
   if (filename_length < 0 ||
       static_cast<size_t>(filename_length) >= sizeof(writer->basefilename)) {
@@ -114,8 +115,7 @@ sdfits *LocalSdfitsWriter::get_or_create_writer(
   }
 
   writer->hdr.nchan = header.n_channels;
-  const uint64_t start_ns = spectrum_time::integration_start_ns(
-      header.timestamp_ns, header.exposure);
+  const uint64_t start_ns = header.integration_start_ns;
   if (!spectrum_time::format_fits_utc(start_ns, writer->hdr.date_obs,
                                       sizeof(writer->hdr.date_obs)))
     return nullptr;
@@ -126,6 +126,10 @@ sdfits *LocalSdfitsWriter::get_or_create_writer(
                         header.channel_bw_hz * header.n_channels / 2;
   writer->hdr.nsubband = 1;
   writer->hdr.npol = 4;
+  configure_sdfits_metadata(*writer, GlobalConfig::getInstance().sdfits_metadata,
+                            GlobalConfig::getInstance().object,
+                            header.cal_mode != 0,
+                            GlobalConfig::getInstance().source_on);
   const int status = writer->sdfits_create();
   if (status != 0) {
     GlobalConfig::getInstance().logger_->error(
@@ -151,8 +155,7 @@ void LocalSdfitsWriter::write_job(Job &job) {
       static_cast<int>(job.header.integration_id);
   writer->data_columns.centre_freq[0] = writer->hdr.obsfreq;
   writer->data_columns.time = spectrum_time::unix_ns_to_mjd(
-      spectrum_time::integration_start_ns(job.header.timestamp_ns,
-                                          job.header.exposure));
+      job.header.integration_start_ns);
   writer->data_columns.exposure = job.header.exposure;
   const int status = writer->sdfits_write_subint();
   writer->data_columns.data = nullptr;

@@ -29,13 +29,23 @@ Baseband_Folder1: /data1
 # baseband_bits 8,4,2
 Baseband_bits: 8
 subband_monitor: true
+# Shared SDFITS scan metadata; use the same keys on processing nodes and Recorder.
+object: test                 # OBJECT column
+source_on: true              # SRCSTATE: ON=true, OFF=false; also used in filenames
+sdfits_metadata:
+  telescope: NSRT            # TELESCOP
+  instrument: 7mm            # INSTRUME
+  # Actual ICRS pointing in degrees; OFF scans need their actual pointing.
+  # ra_deg: 9.1979583333      # CRVAL4
+  # dec_deg: 63.4839166667    # CRVAL5
+  # site_lon_deg: 87.10      # SITELONG, east-positive degrees
+  # site_lat_deg: 43.28      # SITELAT, degrees
+  # site_height_m: 2029.38   # SITEELEV, metres
 # Optional local copy of the spectral-line output. The generated SDFITS uses
 # the same template, headers, columns and DATA layout as Spectral_Line_Recorder.
 local_sdfits:
   enabled: false
   storage_folder: /data
-  object: test
-  source_on: true
   queue_mb: 2048
 subbands:
   # Every `port` value below is the destination ZeroMQ/TCP port on Storage_node_ip

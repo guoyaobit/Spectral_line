@@ -13,7 +13,7 @@ VDIF 帧文件。
 ```text
 +---------------------------+----------------------+----------------------+
 | transport header (24 B)   | spectrum_header      | payload              |
-| version 1                 | 95 B, version 2      | mode-dependent       |
+| version 1                 | 103 B, version 3     | mode-dependent       |
 +---------------------------+----------------------+----------------------+
 offset 0                    offset 24              offset 119
 ```
@@ -35,7 +35,7 @@ Recorder 必须从消息头识别数据身份。当前发送端采用非阻塞�
 | 4 | 2 | `uint16_t` | `version` | 当前为 `1` |
 | 6 | 2 | `uint16_t` | `server_id` | 发送服务器编号，当前有效范围 `0–7` |
 | 8 | 8 | `uint64_t` | `sequence` | 发送进程内单调递增序号 |
-| 16 | 4 | `uint32_t` | `message_bytes` | 后续 body 长度，即 `95 + payload_bytes`，不含本头 |
+| 16 | 4 | `uint32_t` | `message_bytes` | 后续 body 长度，即 `103 + payload_bytes`，不含本头 |
 | 20 | 4 | `uint32_t` | `crc32c` | 后续 body 的 CRC32C |
 
 CRC 使用 CRC-32C/Castagnoli，反射多项式 `0x82F63B78`，初始值
@@ -46,13 +46,13 @@ CRC 使用 CRC-32C/Castagnoli，反射多项式 `0x82F63B78`，初始值
 或链路中断时发送端主动丢弃了完整结果。Recorder 按
 `(server_id, subband_id, window_id, beam_id)` 分流后检查顺序。
 
-## `spectrum_header`（95 字节，version 2）
+## `spectrum_header`（103 字节，version 3）
 
 | 偏移 | 长度 | 类型 | 字段 | 单位/含义 |
 |---:|---:|---|---|---|
 | 0 | 4 | `uint32_t` | `magic` | 固定为 `0x534C5231`（标识 `SLR1`） |
-| 4 | 2 | `uint16_t` | `version` | 当前为 `2` |
-| 6 | 8 | `uint64_t` | `timestamp_ns` | 本次积分中心的 UTC Unix 时间，ns |
+| 4 | 2 | `uint16_t` | `version` | 当前为 `3` |
+| 6 | 8 | `uint64_t` | `timestamp_ns` | 首尾 FFT 块时间跨度的中心，经 PFB 延迟补偿，UTC Unix ns |
 | 14 | 4 | `uint32_t` | `obs_id` | `Observation_ID` 的 CRC32C；手动自动编号时为 `0` |
 | 18 | 4 | `uint32_t` | `integration_id` | 该窗口的积分序号，从 `0` 开始递增 |
 | 22 | 2 | `uint16_t` | `subband_id` | 全局子带编号 `0–31` |
@@ -65,7 +65,7 @@ CRC 使用 CRC-32C/Castagnoli，反射多项式 `0x82F63B78`，初始值
 | 62 | 1 | `uint8_t` | `stokes` | 谱线结果中每通道的浮点数个数，当前为 `4` |
 | 63 | 2 | `uint16_t` | `pkt_id` | 兼容字段；完整 ZeroMQ message 固定为 `0` |
 | 65 | 2 | `uint16_t` | `total_pkt` | 兼容字段；无应用层分片，固定为 `1` |
-| 67 | 4 | `float` | `exposure` | 配置的积分时间，s |
+| 67 | 4 | `float` | `exposure` | 实际累计的有效积分时长，s；不含空白和其他噪声源状态 |
 | 71 | 1 | `uint8_t` | `noise_state` | 噪声源状态：`0=OFF`、`1=ON`、`2=BLANK` |
 | 72 | 1 | `uint8_t` | `cal_mode` | `0=普通观测`、`1=噪声源标定观测` |
 | 73 | 1 | `uint8_t` | `beam_id` | `0=波束 A`、`1=波束 B` |
@@ -73,6 +73,11 @@ CRC 使用 CRC-32C/Castagnoli，反射多项式 `0x82F63B78`，初始值
 | 75 | 8 | `double` | `ra` | 赤经；当前未配置时为 `0` |
 | 83 | 8 | `double` | `dec` | 赤纬；当前未配置时为 `0` |
 | 91 | 4 | `uint32_t` | `flags` | 保留标志，当前为 `0` |
+| 95 | 8 | `uint64_t` | `integration_start_ns` | 第一个有效块开始时间，经 PFB 补偿，UTC Unix ns |
+
+校准模式允许同一状态跨多个周期累计，因此时间跨度可以大于有效曝光。
+Recorder 和本地 SDFITS 的 `TIME`、首行 `DATE-OBS/MJD-OBS/STTMJD` 使用显式开始时间，
+不得从中心时间减去半个有效曝光反推。v3 与 v2 不兼容，处理端和 Recorder 必须配套更新。
 
 由于采用小端序，在线路上两个 magic 的 4 个原始字节分别为 `31 5a 4c 53` 和
 `31 52 4c 53`；接收端应按小端 `uint32_t` 比较上述数值，而不是直接比较 ASCII 字节串。
@@ -144,7 +149,7 @@ Recorder 应先按消息头的 `subband_id`、`beam_id`、`timestamp_ns` 等身�
 
 建议按以下顺序拒绝无效消息：
 
-1. ZeroMQ message 至少为 `24 + 95` 字节，并且总长度等于
+1. ZeroMQ message 至少为 `24 + 103` 字节，并且总长度等于
    `24 + transport.message_bytes`。
 2. transport `magic/version`、`server_id` 和 body CRC32C 正确。
 3. spectrum `magic/version` 正确，且 `pkt_id == 0`、`total_pkt == 1`。
@@ -162,14 +167,14 @@ Recorder 应先按消息头的 `subband_id`、`beam_id`、`timestamp_ns` 等身�
 import struct
 
 TRANSPORT = struct.Struct("<IHHQII")
-SPECTRUM = struct.Struct("<IHQIIHHddddIBHHfBBBBddI")
+SPECTRUM = struct.Struct("<IHQIIHHddddIBHHfBBBBddIQ")
 
 assert TRANSPORT.size == 24
-assert SPECTRUM.size == 95
+assert SPECTRUM.size == 103
 
 transport = TRANSPORT.unpack_from(message, 0)
 header = SPECTRUM.unpack_from(message, TRANSPORT.size)
-payload_offset = TRANSPORT.size + SPECTRUM.size  # 119
+payload_offset = TRANSPORT.size + SPECTRUM.size  # 127
 ```
 
 协议的权威定义位于

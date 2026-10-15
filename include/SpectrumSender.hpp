@@ -14,7 +14,7 @@
 #pragma pack(push, 1)
 typedef struct {
   uint32_t magic = 0x534C5231; // "SLR1"
-  uint16_t version = 2;
+  uint16_t version = 3;
   uint64_t timestamp_ns; // UTC integration centre, Unix epoch nanoseconds
   uint32_t obs_id;
   uint32_t integration_id;
@@ -27,7 +27,7 @@ typedef struct {
   uint32_t n_channels;
   uint8_t stokes;
   // A ZeroMQ message contains one complete result. These fields remain for
-  // spectrum_header v2 layout compatibility and are always 0/1.
+  // The original header prefix is preserved; these fields are always 0/1.
   uint16_t pkt_id;
   uint16_t total_pkt;
   float exposure;
@@ -38,11 +38,12 @@ typedef struct {
   double ra;
   double dec;
   uint32_t flags;
+  uint64_t integration_start_ns = 0;
 } spectrum_header;
 #pragma pack(pop)
 
-static_assert(sizeof(spectrum_header) == 95,
-              "spectrum_header protocol size must remain 95 bytes");
+static_assert(sizeof(spectrum_header) == 103,
+              "spectrum_header v3 protocol size must remain 103 bytes");
 static_assert(offsetof(spectrum_header, beam_id) == 73,
               "spectrum_header beam_id offset must remain stable");
 

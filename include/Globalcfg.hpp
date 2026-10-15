@@ -143,9 +143,10 @@ public:
   int Baseband_bits = 8;
   bool subband_monitor = false; // Publish recent frames for monitoring
   bool local_sdfits_enabled = false;
+  YAML::Node sdfits_metadata;
   std::string local_sdfits_folder = "/data";
-  std::string local_sdfits_object;
-  bool local_sdfits_source_on = true;
+  std::string object;
+  bool source_on = true;
   size_t local_sdfits_queue_bytes = 2048ULL * 1024ULL * 1024ULL;
   // Packets in one FFT interval.
   int batchsize() const { return total_nfft / 4096; }
@@ -200,6 +201,7 @@ public:
   bool initFromYaml(const std::string &filename) {
     try {
       YAML::Node config = YAML::LoadFile(filename);
+      sdfits_metadata = config["sdfits_metadata"];
       if (config["Debug"])
         Debug_mode = config["Debug"].as<bool>();
       logger_->set_level(Debug_mode ? spdlog::level::debug
@@ -255,10 +257,16 @@ public:
           if (local_sdfits_folder.empty())
             throw std::runtime_error(
                 "local_sdfits.storage_folder must not be empty");
-          if (local_sdfits["object"])
-            local_sdfits_object = local_sdfits["object"].as<std::string>();
-          if (local_sdfits["source_on"])
-            local_sdfits_source_on = local_sdfits["source_on"].as<bool>();
+          // Top-level scan keys match Recorder. Read old nested keys only
+          // as a fallback for existing processing-node deployments.
+          if (config["object"])
+            object = config["object"].as<std::string>();
+          else if (local_sdfits["object"])
+            object = local_sdfits["object"].as<std::string>();
+          if (config["source_on"])
+            source_on = config["source_on"].as<bool>();
+          else if (local_sdfits["source_on"])
+            source_on = local_sdfits["source_on"].as<bool>();
           size_t queue_mb = 2048;
           if (local_sdfits["queue_mb"])
             queue_mb = local_sdfits["queue_mb"].as<size_t>();
@@ -270,8 +278,7 @@ public:
           const std::string directory =
               Observation_ID.empty()
                   ? automatic_observation_directory_id(
-                        local_sdfits_object,
-                        local_sdfits_source_on ? "ON" : "OFF")
+                        object, source_on ? "ON" : "OFF")
                   : Observation_ID;
           local_sdfits_folder =
               (std::filesystem::path(local_sdfits_folder) / directory)

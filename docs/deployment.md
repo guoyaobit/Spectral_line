@@ -203,7 +203,7 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   `20260924T123015Z_M87_scan003`. It must contain 1-64 ASCII letters, digits,
   `.`, `_`, or `-`. Baseband mode uses it as the directory name; spectral-line
   and continuum modes publish its CRC32C value in `spectrum_header.obs_id`
-  without changing the version-2 header layout. If it is omitted, null, or an
+  in the version-3 header. If it is omitted, null, or an
   empty string, spectrum modes publish `obs_id=0`; baseband mode creates an
   ISO-8601 basic UTC directory such as `20260925T143012.317Z` locally.
 - `Memory_pool_per_stream`: pinned/RAM pool in GiB. Total allocation scales with
@@ -222,10 +222,10 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
 - `subbands[].beam`: beam label `A` or `B`. Each subband can select its beam
   independently. For compatibility with an older deployed `config.yaml`, a
   missing value defaults to A for subbands 0–3 and B for subbands 4–7 with a
-  startup warning. Spectrum protocol version 2 writes this value to
+  startup warning. Spectrum protocol version 3 writes this value to
   `spectrum_header.beam_id`, where `0` means beam A and `1` means beam B. The
-  field reuses one byte of the former two-byte reserved area, so the packed
-  header remains 95 bytes and offsets of all preceding fields remain unchanged.
+  field retains its original offset. The packed header is 103 bytes, including
+  an explicit integration start time; sender and Recorder must both use v3.
   Adjacent A/B configuration entries share one physical subband ID. The sender
   calculates the global `spectrum_header.subband_id` as
   `ServerID * 4 + local_config_index / 2`, producing IDs 0 through 31 across
