@@ -109,6 +109,90 @@ When every changed stream in a scan has rendered successfully, the service
 atomically replaces `/dev/shm/monitor_plots/manifest.json`. A failed render
 leaves the previous manifest unchanged and is retried on the next scan.
 
+## Plot a baseband VDIF spectrum
+
+The baseband recorder writes one complex VDIF stream per polarization using
+8-, 4-, or 2-bit two's-complement I/Q components. Plot an averaged spectrum
+from one file (or consecutive rotated parts) with:
+
+```sh
+python scripts/plot_vdif_spectrum.py \
+  7mm_sb00_A_X_part0000.vdif \
+  --center-frequency-hz 512e6 \
+  --csv sb00_A_X_spectrum.csv
+```
+
+The tool reads the sample width and frame length from each VDIF header, checks
+frame continuity, skips frames marked invalid, and reports missing, duplicate,
+or reordered frames. It defaults to the receiver's 256 Msps rate, a 65536-point
+Hann-window FFT, and the first 2048 frames. Use `--max-frames 0` to process all
+input data and `--sideband lower` when RF frequency decreases with baseband
+frequency. Pass rotated parts in chronological order to combine them.
+
+For old files whose payload remains in FPGA byte order—8-bit imaginary (Q)
+followed by 8-bit real (I)—use the dedicated reader:
+
+```sh
+python scripts/plot_old_vdif_spectrum.py old.vdif \
+  --center-frequency-hz 512e6
+```
+
+When `-o/--output` is omitted, both VDIF spectrum tools write a self-contained
+`.spectrum.html` plot. Open it in a browser to zoom the frequency axis with the
+mouse wheel, drag to pan, and hover to inspect frequency and power. No network
+connection or JavaScript package download is required. Use an explicit `.svg`,
+`.pdf`, or `.png` suffix when a static plot is needed.
+
+The old-format reader treats components as offset binary by default (`0x80` is
+zero). If an old file already contains signed two's-complement bytes, add
+`--encoding twos-complement`. The old recorder stored the 8192-byte payload
+length, rather than the 8224-byte header-plus-payload length required by VDIF,
+in the frame-length field. This reader applies that historical convention and
+advances 32 + 8192 bytes per frame while still validating the remaining header
+format.
+
+## ON/OFF spectral calibration
+
+Install the offline spectral-processing dependencies and convert an ON/OFF
+SDFITS pair to a single CLASS-readable FITS spectrum with an LSRK radio-velocity
+axis:
+
+```sh
+python -m pip install -r scripts/requirements.txt
+python scripts/make_class_onoff.py on.sdfits off.sdfits output.fits \
+  --ra 02:27:03.866 --dec +61:52:24.82 --rest-mhz 22235.080 --plot
+```
+
+By default the script reads `OBSFREQ` and `CHAN_BW` from the Recorder output,
+normalizes the accumulated powers by total exposure, calibrates XX and YY
+separately, and then averages them into Stokes I. A three-channel Hanning kernel
+is applied by default; use
+`--smooth none`, `--smooth boxcar --smooth-width 5`, or
+`--smooth gaussian --smooth-sigma 2` to change it. Use `--tsys-k` only when an
+independently measured system temperature is available. Run
+`python scripts/make_class_onoff.py --help` for manual LO/IF frequency setup,
+sideband, and single-polarization options.
+
+When the SDFITS rows contain the Recorder `NOISE` state, rows with `NOISE=0`
+are used for the source spectrum and rows with `NOISE=1` are used only for
+noise-diode calibration (`NOISE=2` is discarded). Given the measured diode
+temperature, produce a spectrum in kelvin with:
+
+```sh
+python scripts/make_class_onoff.py on.sdfits off.sdfits output.fits \
+  --tcal-k 5.0
+```
+
+Use `--tcal-xx-k` and `--tcal-yy-k` instead when the two receptor calibration
+temperatures differ. The script derives the OFF-scan system temperature per
+channel as `Tsys = Tcal * Poff / (Pcal_on - Poff)` and then applies the usual
+position-switch calibration `Ta = ((Pon - Poff) / Poff) * Tsys`. Tcal must be
+the effective injected calibration temperature for this receiver and observing
+frequency; it is not inferred from the switching state alone.
+
+See [`docs/sdfits-onoff.md`](docs/sdfits-onoff.md) for the complete calibration,
+frequency-axis, metadata, and CLASS import workflow.
+
 ## Local SDFITS copy
 
 Spectral-line mode can also save completed integrations on each processing
