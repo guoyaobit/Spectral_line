@@ -46,12 +46,12 @@ Each 100G receiver interface accepts all eight UDP destination ports.
 The local interface address is read from the operating system. The destination
 address is read separately from the deployed `config.yaml`.
 
-| Server | Local interface | Local IPv4 | Local MAC | Configured destination IPv4 | Configured destination MAC |
-|---|---|---|---|---|---|
+| Server | Local interface | Local IPv4 | Local MAC | Configured destination IPv4 |
+|---|---|---|---|---|
 {% for host in groups['spectral_line_servers'] | default([]) -%}
 {% set host_data = hostvars[host] -%}
 {% set config = host_data.spectral_line_summary_config | default({}) -%}
-| {{ host }} | {{ config.get('Sender_Nic', 'unavailable') }} | {{ host_data.spectral_line_summary_sender_local_ipv4 | default('unavailable') }} | {{ host_data.spectral_line_summary_sender_local_mac | default('unavailable') }} | {{ config.get('Storage_node_ip', 'unavailable') }} | {{ config.get('Storage_node_mac', 'unavailable') }} |
+| {{ host }} | {{ config.get('Sender_Nic', 'unavailable') }} | {{ host_data.spectral_line_summary_sender_local_ipv4 | default('unavailable') }} | {{ host_data.spectral_line_summary_sender_local_mac | default('unavailable') }} | {{ config.get('Storage_node_ip', 'unavailable') }} |
 {% endfor %}
 
 ## Subband configuration
@@ -82,5 +82,5 @@ address is read separately from the deployed `config.yaml`.
   X/Y streams of one subband.
 - SR-IOV sender local IPv4 and MAC: queried live from the interface named by
   `Sender_Nic` (for example, `ens81f0v0`). These values do not come from
-  `Storage_node_ip` or `Storage_node_mac`.
+  `Storage_node_ip`.
 - Subbands and storage destination: deployed `config.yaml`.

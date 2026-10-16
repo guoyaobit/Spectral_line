@@ -18,7 +18,6 @@ integration_t: 1
 win_bw: 256e6
 win_channels: 65536
 Storage_node_ip: 192.168.101.11
-Storage_node_mac: 0c:42:a1:78:8f:bc
 Sender_Nic: ens81f0v0
 Baseband_Folder0: /data
 Baseband_Folder1: /data1

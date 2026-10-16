@@ -227,7 +227,7 @@ ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml \
 ```
 
 Each selected file replaces the entire remote `config.yaml`. Therefore,
-server-specific destination IPs, MACs, sender interfaces, and any other
+server-specific destination IPs, sender interfaces, and any other
 settings must be edited in that server's static file before deployment.
 
 ## Generate the cluster summary
@@ -236,8 +236,8 @@ Every successful deployment writes `ansible/deployment-summary.md` on the
 controller. Separate Markdown tables contain server identity, management and
 BMC addresses, 100G receiver interfaces, SR-IOV sender interfaces, and subband
 frequency ranges. The sender interface IPv4/MAC values are read live from the
-local interface named by `Sender_Nic`; `Storage_node_ip` and
-`Storage_node_mac` are shown separately as configured destination values.
+local interface named by `Sender_Nic`; `Storage_node_ip` is shown separately
+as the configured destination address.
 
 Refresh the summary without rebuilding or restarting the receiver:
 

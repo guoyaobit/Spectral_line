@@ -232,8 +232,9 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   GPU0 through GPU7; `beam_id` keeps A and B distinct.
 - `Storage_node_ip`: address of the result receiver. Linux routing selects the
   output interface and performs normal ARP/neighbor discovery.
-- `Storage_node_mac` and `Sender_Nic`: optional deployment-summary metadata;
-  the ZeroMQ sender does not read them or install a permanent neighbor entry.
+- `Sender_Nic`: optional deployment-summary metadata used to query the local
+  interface IPv4 and MAC. The ZeroMQ sender does not read it or install a
+  permanent neighbor entry; no destination MAC configuration is required.
 - `subbands[].port`: destination ZeroMQ/TCP port on `Storage_node_ip` for that
   subband's complete spectrum results. It does not configure a local source
   port. Port values do not identify subbands, beams, or windows; the Writer
