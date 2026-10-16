@@ -8,21 +8,42 @@ ServerID: 3
 # Optional: the system controller may set one shared ID on every node and the
 # Recorder. Leave commented for manual mode; spectrum packets then use obs_id=0.
 # Observation_ID: 20260924T000000Z_example_scan001
+# Per receive stream, in GiB. All 16 streams enabled: 128 GiB plus overhead.
 Memory_pool_per_stream: 8
 observation_mode: 1
 cal_mode: false
+# Noise-switch timing; used only when cal_mode is true.
 noise_source:
   period_ms: 1000
   duty_cycle: 50
-integration_t: 1
+integration_t: 1 # Seconds, rounded down to complete FFT intervals
 win_bw: 256e6
 win_channels: 65536
+# FFT length = round(256e6 / win_bw * win_channels): 65536..16777216,
+# divisible by 4096. At 256 MHz, 32768 channels is not supported.
 Storage_node_ip: 192.168.101.11
-Sender_Nic: ens81f0v0
+# Baseband mode only.
 Baseband_Folder0: /data
 Baseband_Folder1: /data1
-Baseband_bits: 8
+Baseband_bits: 8 # I/Q component width: 8, 4, or 2 bits
 subband_monitor: true
+# Used only when local_sdfits.enabled is true; match Recorder scan metadata.
+object: test                 # OBJECT
+source_on: true              # SRCSTATE and automatic directory name
+sdfits_metadata:
+  telescope: NSRT            # TELESCOP
+  instrument: 7mm            # INSTRUME
+  # Actual ICRS pointing; OFF scans need their actual pointing.
+  # ra_deg: 9.1979583333
+  # dec_deg: 63.4839166667
+  # site_lon_deg: 87.10       # East-positive degrees
+  # site_lat_deg: 43.28       # Degrees
+  # site_height_m: 2029.38    # Metres
+# Spectral-line mode only; same SDFITS format as Recorder.
+local_sdfits:
+  enabled: false
+  storage_folder: /data
+  queue_mb: 2048             # MiB, shared by all local subband/window files
 subbands:
   # port is the outgoing ZeroMQ/TCP result port, not the 100G input UDP port.
   # DPDK port 0 (ETH0, 10.17.16.17), input UDP 60000/60001: beam A, V/H.

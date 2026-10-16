@@ -227,17 +227,16 @@ ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml \
 ```
 
 Each selected file replaces the entire remote `config.yaml`. Therefore,
-server-specific destination IPs, sender interfaces, and any other
+server-specific destination IPs and any other
 settings must be edited in that server's static file before deployment.
 
 ## Generate the cluster summary
 
 Every successful deployment writes `ansible/deployment-summary.md` on the
 controller. Separate Markdown tables contain server identity, management and
-BMC addresses, 100G receiver interfaces, SR-IOV sender interfaces, and subband
-frequency ranges. The sender interface IPv4/MAC values are read live from the
-local interface named by `Sender_Nic`; `Storage_node_ip` is shown separately
-as the configured destination address.
+BMC addresses, 100G receiver interfaces, configured result destinations, and
+subband frequency ranges. `Storage_node_ip` provides the result destination;
+Linux routing selects the output interface automatically.
 
 Refresh the summary without rebuilding or restarting the receiver:
 
@@ -246,8 +245,7 @@ ansible-playbook -i ansible/inventory.yml ansible/summary.yml
 ```
 
 The file is generated operational data and is excluded from Git and deployment
-source archives. If an SR-IOV address is shown as `unavailable`, verify that the
-interface named by `Sender_Nic` exists and has an IPv4 address. If the 100G
+source archives. If the 100G
 interfaces are not detected, verify `ibdev2netdev` is installed and reports
 both `mlx5_0` and `mlx5_1`, or provide the inventory fallback values. A BMC
 value of `unavailable` means `ipmitool lan print` failed; verify IPMI device

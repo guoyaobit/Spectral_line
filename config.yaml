@@ -1,34 +1,31 @@
 Debug: false
-# 0~7 influence result filename
+# Node ID (0-7); also determines global subband IDs.
 ServerID: 0
 # Optional. A controller sets the same unique value on every GPU node and the
 # Recorder. If omitted, spectrum results use obs_id=0 and baseband mode creates
 # an ISO-8601 basic UTC observation directory such as 20260925T143012.317Z.
 # Observation_ID: 20260924T000000Z_example_scan001
-# don't make the memory pool size > 128GB
-Memory_pool_per_stream: 8 # GB
+# Per receive stream, in GiB. All 16 streams enabled: 128 GiB plus overhead.
+Memory_pool_per_stream: 8
 observation_mode: 1 # 0: baseband, 1: spectral line, 2: continuum
 cal_mode: false
+# Noise-switch timing; used only when cal_mode is true.
 noise_source:
   period_ms: 1000
   duty_cycle: 50
-integration_t: 1 # Intergration time s
+integration_t: 1 # Seconds, rounded down to complete FFT intervals
 win_bw: 256e6 # window bandwidth Hz; e.g. 1e6,2e6,4e6,32e6,64e6,256e6
-win_channels: 65536 # window channels  32768,65536
-# Spectrum result destination. Linux routing selects the kernel-managed output
-# interface and performs normal neighbour discovery; the program does not set
-# a static ARP entry. Sender_Nic is optional deployment-summary metadata
-# and is not used by the ZeroMQ sender.
+win_channels: 65536
+# FFT length = round(256e6 / win_bw * win_channels): 65536..16777216,
+# divisible by 4096. At 256 MHz, 32768 channels is not supported.
+# Spectrum result destination. Linux routing selects the output interface.
 Storage_node_ip: 192.168.101.11
-Sender_Nic: ens81f0v0
-# disk1
+# Baseband mode only.
 Baseband_Folder0: /data
-# disk2
 Baseband_Folder1: /data1
-# baseband_bits 8,4,2
-Baseband_bits: 8
+Baseband_bits: 8 # I/Q component width: 8, 4, or 2 bits
 subband_monitor: true
-# Shared SDFITS scan metadata; use the same keys on processing nodes and Recorder.
+# Used only when local_sdfits.enabled is true; match Recorder scan metadata.
 object: test                 # OBJECT column
 source_on: true              # SRCSTATE: ON=true, OFF=false; also used in filenames
 sdfits_metadata:
@@ -40,12 +37,11 @@ sdfits_metadata:
   # site_lon_deg: 87.10      # SITELONG, east-positive degrees
   # site_lat_deg: 43.28      # SITELAT, degrees
   # site_height_m: 2029.38   # SITEELEV, metres
-# Optional local copy of the spectral-line output. The generated SDFITS uses
-# the same template, headers, columns and DATA layout as Spectral_Line_Recorder.
+# Spectral-line mode only; same SDFITS format as Recorder.
 local_sdfits:
   enabled: false
   storage_folder: /data
-  queue_mb: 2048
+  queue_mb: 2048             # MiB, shared by all local subband/window files
 subbands:
   # Every `port` value below is the destination ZeroMQ/TCP port on Storage_node_ip
   # used to send the processed spectrum result. Values may be arbitrary TCP

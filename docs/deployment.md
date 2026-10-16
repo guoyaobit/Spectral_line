@@ -27,12 +27,12 @@ carries Y polarisation.
 | 60007 | 7 | Y | 3 | 7 |
 
 Packets arriving on other UDP destination ports are dropped by the catch-all
-DPDK flow rule. Spectrum results leave through a kernel-managed SR-IOV virtual
-function (VF) selected by the Linux routing table. Every configured
+DPDK flow rule. Spectrum results leave through a kernel-managed network
+interface selected by the Linux routing table. Every configured
 `subbands[].port` value (`60000–60007` in the example configuration) is the
 outgoing result destination ZeroMQ/TCP port on `Storage_node_ip`. It is
 independent of the fixed 100G input-port mapping above and is not a local
-source port. The sender does not install a static ARP entry.
+source port.
 
 The binary result protocol is documented in
 [result-data-format.md](result-data-format.md), including the packed headers,
@@ -163,10 +163,9 @@ in the deployed
 the trailing digits of the inventory hostname when the variable is omitted.
 The resulting ID must be between 0 and 7. After deployment it also generates
 `ansible/deployment-summary.md` on the controller with separate tables for each
-receiver's management IP, local BMC IP, 100G receiver addresses, live local
-SR-IOV sender address, configured storage destination, and subband frequency
-ranges. The local sender address is queried from the operating-system interface
-named by `Sender_Nic`; it is not taken from `Storage_node_ip`. The BMC IP is read with
+receiver's management IP, local BMC IP, 100G receiver addresses, configured
+storage destination, and subband frequency ranges. Linux routing selects the
+result output interface automatically. The BMC IP is read with
 `ipmitool lan print` (channel 1 by default, configurable with
 `spectral_line_bmc_channel`). The 100G entries are discovered by mapping `mlx5_0`
 and `mlx5_1` to Linux interfaces with `ibdev2netdev`, then reading each
@@ -231,10 +230,7 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   `ServerID * 4 + local_config_index / 2`, producing IDs 0 through 31 across
   GPU0 through GPU7; `beam_id` keeps A and B distinct.
 - `Storage_node_ip`: address of the result receiver. Linux routing selects the
-  output interface and performs normal ARP/neighbor discovery.
-- `Sender_Nic`: optional deployment-summary metadata used to query the local
-  interface IPv4 and MAC. The ZeroMQ sender does not read it or install a
-  permanent neighbor entry; no destination MAC configuration is required.
+  output interface for the ZeroMQ/TCP connection.
 - `subbands[].port`: destination ZeroMQ/TCP port on `Storage_node_ip` for that
   subband's complete spectrum results. It does not configure a local source
   port. Port values do not identify subbands, beams, or windows; the Writer
@@ -330,8 +326,7 @@ receiver process is expected to remain active until an explicit
 `systemctl stop spectral-line.service` terminates it. An unexpected exit is
 therefore visible as a failed or inactive service instead of a restart loop.
 
-The receiver unit runs as root because DPDK/VFIO access and the current static
-neighbor setup require elevated privileges. Do not start it until the required
+The receiver unit runs as root for DPDK/VFIO access. Do not start it until the required
 GRUB reboot, huge pages, NIC binding, and `config.yaml` checks are complete.
 
 ## Start and validate

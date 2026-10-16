@@ -301,7 +301,7 @@ public:
 
     // ZeroMQ sockets are thread-affine. Create and connect every window's
     // PUSH socket on the same GPU worker thread that performs later sends.
-    // TCP neighbour discovery is left entirely to the Linux network stack.
+    // Linux routing selects the TCP output interface.
     for (auto *window : m_config->windows) {
       if (!window->sender.prepare()) {
         cfg.logger_->error(

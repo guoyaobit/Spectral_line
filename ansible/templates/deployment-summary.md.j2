@@ -41,17 +41,17 @@ Each 100G receiver interface accepts all eight UDP destination ports.
 | 60006 | 6 | B | V | 3 | 7 |
 | 60007 | 7 | B | H | 3 | 7 |
 
-## SR-IOV sender interfaces
+## Result destinations
 
-The local interface address is read from the operating system. The destination
-address is read separately from the deployed `config.yaml`.
+The destination address is read from the deployed `config.yaml`. Linux routing
+selects the output interface automatically.
 
-| Server | Local interface | Local IPv4 | Local MAC | Configured destination IPv4 |
-|---|---|---|---|---|
+| Server | Configured destination IPv4 |
+|---|---|
 {% for host in groups['spectral_line_servers'] | default([]) -%}
 {% set host_data = hostvars[host] -%}
 {% set config = host_data.spectral_line_summary_config | default({}) -%}
-| {{ host }} | {{ config.get('Sender_Nic', 'unavailable') }} | {{ host_data.spectral_line_summary_sender_local_ipv4 | default('unavailable') }} | {{ host_data.spectral_line_summary_sender_local_mac | default('unavailable') }} | {{ config.get('Storage_node_ip', 'unavailable') }} |
+| {{ host }} | {{ config.get('Storage_node_ip', 'unavailable') }} |
 {% endfor %}
 
 ## Subband configuration
@@ -80,7 +80,4 @@ address is read separately from the deployed `config.yaml`.
   the operating system's interface IPv4 and MAC addresses. Both interfaces
   receive UDP destination ports `60000–60007`; adjacent even/odd ports are the
   X/Y streams of one subband.
-- SR-IOV sender local IPv4 and MAC: queried live from the interface named by
-  `Sender_Nic` (for example, `ens81f0v0`). These values do not come from
-  `Storage_node_ip`.
 - Subbands and storage destination: deployed `config.yaml`.
