@@ -1,5 +1,8 @@
 ---
 # Complete static configuration for GPU0 (server1).
+# Source: docs/数据分配新.xlsx, 服务器角度, rows 1-16.
+# RF coverage: 29984-31008 MHz; workbook IF reference: 384-1408 MHz.
+# start_freq/end_freq/center_freq below are RF in Hz.
 # 100G input: ETH0=10.17.16.11, ETH1=10.17.16.12.
 # Edit this file on the Ansible controller, then deploy it with
 # ansible-playbook -i ansible/inventory.yml ansible/configure-subbands.yml
@@ -45,76 +48,85 @@ local_sdfits:
   storage_folder: /data
   queue_mb: 2048             # MiB, shared by all local subband/window files
 subbands:
-  # port is the outgoing ZeroMQ/TCP result port, not the 100G input UDP port.
-  # DPDK port 0 (ETH0, 10.17.16.11), input UDP 60000/60001: beam A, V/H.
+  # Ordered A/B pairs; each entry receives V/H over the fixed UDP pair below.
+  # port is the independent ZeroMQ/TCP result destination, not an input port.
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60000/60001 (V/H).
+  # Global subband 0, beam A; IF input reference 384-640 MHz.
   - gpu_id: 0
     enable: true
     beam: A
-    start_freq: 384e6
-    end_freq: 640e6
+    start_freq: 29984e6
+    end_freq: 30240e6
     port: 60000
     windows:
-      - center_freq: 512e6
-  # DPDK port 0 (ETH0, 10.17.16.11), input UDP 60002/60003: beam B, V/H.
+      - center_freq: 30112e6
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60002/60003 (V/H).
+  # Global subband 0, beam B; IF input reference 384-640 MHz.
   - gpu_id: 0
     enable: true
     beam: B
-    start_freq: 384e6
-    end_freq: 640e6
+    start_freq: 29984e6
+    end_freq: 30240e6
     port: 60001
     windows:
-      - center_freq: 512e6
-  # DPDK port 0 (ETH0, 10.17.16.11), input UDP 60004/60005: beam A, V/H.
+      - center_freq: 30112e6
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60004/60005 (V/H).
+  # Global subband 1, beam A; IF input reference 640-896 MHz.
   - gpu_id: 1
     enable: true
     beam: A
-    start_freq: 640e6
-    end_freq: 896e6
+    start_freq: 30240e6
+    end_freq: 30496e6
     port: 60002
     windows:
-      - center_freq: 768e6
-  # DPDK port 0 (ETH0, 10.17.16.11), input UDP 60006/60007: beam B, V/H.
+      - center_freq: 30368e6
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60006/60007 (V/H).
+  # Global subband 1, beam B; IF input reference 640-896 MHz.
   - gpu_id: 1
     enable: true
     beam: B
-    start_freq: 640e6
-    end_freq: 896e6
+    start_freq: 30240e6
+    end_freq: 30496e6
     port: 60003
     windows:
-      - center_freq: 768e6
-  # DPDK port 1 (ETH1, 10.17.16.12), input UDP 60000/60001: beam A, V/H.
+      - center_freq: 30368e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60000/60001 (V/H).
+  # Global subband 2, beam A; IF input reference 896-1152 MHz.
   - gpu_id: 2
     enable: true
     beam: A
-    start_freq: 896e6
-    end_freq: 1152e6
+    start_freq: 30496e6
+    end_freq: 30752e6
     port: 60004
     windows:
-      - center_freq: 1024e6
-  # DPDK port 1 (ETH1, 10.17.16.12), input UDP 60002/60003: beam B, V/H.
+      - center_freq: 30624e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60002/60003 (V/H).
+  # Global subband 2, beam B; IF input reference 896-1152 MHz.
   - gpu_id: 2
     enable: true
     beam: B
-    start_freq: 896e6
-    end_freq: 1152e6
+    start_freq: 30496e6
+    end_freq: 30752e6
     port: 60005
     windows:
-      - center_freq: 1024e6
-  # DPDK port 1 (ETH1, 10.17.16.12), input UDP 60004/60005: beam A, V/H.
+      - center_freq: 30624e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60004/60005 (V/H).
+  # Global subband 3, beam A; IF input reference 1152-1408 MHz.
   - gpu_id: 3
     enable: true
     beam: A
-    start_freq: 1152e6
-    end_freq: 1408e6
+    start_freq: 30752e6
+    end_freq: 31008e6
     port: 60006
     windows:
-      - center_freq: 1280e6
-  # DPDK port 1 (ETH1, 10.17.16.12), input UDP 60006/60007: beam B, V/H.
+      - center_freq: 30880e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60006/60007 (V/H).
+  # Global subband 3, beam B; IF input reference 1152-1408 MHz.
   - gpu_id: 3
     enable: true
     beam: B
-    start_freq: 1152e6
-    end_freq: 1408e6
+    start_freq: 30752e6
+    end_freq: 31008e6
     port: 60007
     windows:
-      - center_freq: 1280e6
+      - center_freq: 30880e6

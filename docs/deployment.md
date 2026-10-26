@@ -2,6 +2,39 @@
 
 ## Scope and assumptions
 
+The original [server/subband allocation workbook](数据分配新.xlsx) is included
+unchanged. The static YAML files follow its `服务器角度` sheet:
+
+| Configuration | Server | ETH0 input IPv4 | ETH1 input IPv4 | IF reference (MHz) | Configured RF coverage (MHz) |
+|---|---|---|---|---|---|
+| GPU0.yaml | server1 | 10.17.16.11 | 10.17.16.12 | 384-1408 | 29984-31008 |
+| GPU1.yaml | server2 | 10.17.16.13 | 10.17.16.14 | 1408-2432 | 31008-32032 |
+| GPU2.yaml | server3 | 10.17.16.15 | 10.17.16.16 | 2432-3456 | 32032-33056 |
+| GPU3.yaml | server4 | 10.17.16.17 | 10.17.16.18 | 3456-4480 | 33056-34080 |
+| GPU4.yaml | server5 | 10.17.16.19 | 10.17.16.20 | 384-1408 | 33984-35008 |
+| GPU5.yaml | server6 | 10.17.16.21 | 10.17.16.22 | 1408-2432 | 35008-36032 |
+| GPU6.yaml | server7 | 10.17.16.23 | 10.17.16.24 | 2432-3456 | 36032-37056 |
+| GPU7.yaml | server8 | 10.17.16.25 | 10.17.16.26 | 3456-4480 | 37056-38080 |
+
+The root `config.yaml` defaults to GPU0/server1. Each server has four 256 MHz
+frequency bands, each represented by adjacent beam A/B entries. Two input
+streams (V/H) feed each entry. The YAML `start_freq`, `end_freq` and window
+`center_freq` use the workbook's RF values in Hz. The IF ranges remain input
+references only; server1/server5 (and the other corresponding pairs) have
+matching IF ranges but different configured RF ranges. Window centers are
+the midpoint of their RF start/end frequencies; each bandwidth remains 256 MHz.
+
+The SDFITS writers in both projects label these frequencies `FREQTYPE=RF`.
+Processing nodes must supply RF values; the writers do not apply an LO or
+sideband conversion. Do not add the LO again to already-RF frequency values.
+
+The input addresses document the hardware allocation; these YAML comments do
+not configure NIC addresses or DPDK device order. Confirm ETH0/ETH1 correspond
+to DPDK port 0/1 on each host. The workbook's UDP ports are fixed input ports,
+not `Storage_node_ip` or the independent ZeroMQ/TCP result ports. Receiver
+destination IPs, management IPs, GPU assignments and other settings not
+specified by the workbook are preserved.
+
 This program is a Linux-only, hardware-coupled receiver. The current code
 expects two DPDK-visible NIC ports, eight RX queues per port, CUDA-capable GPUs,
 and VDIF UDP input with a 32-byte VDIF header plus an 8192-byte payload. Test

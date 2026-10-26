@@ -1,4 +1,8 @@
 Debug: false
+# Default node: GPU0 / server1, matching ansible/configs/GPU0.yaml.
+# Source: docs/数据分配新.xlsx, 服务器角度, rows 1-16.
+# 100G inputs: ETH0=10.17.16.11, ETH1=10.17.16.12 (hardware reference).
+# Frequencies below are RF in Hz; coverage is 29984-31008 MHz.
 # Node ID (0-7); also determines global subband IDs.
 ServerID: 0
 # Optional. A controller sets the same unique value on every GPU node and the
@@ -43,80 +47,85 @@ local_sdfits:
   storage_folder: /data
   queue_mb: 2048             # MiB, shared by all local subband/window files
 subbands:
-  # Every `port` value below is the destination ZeroMQ/TCP port on Storage_node_ip
-  # used to send the processed spectrum result. Values may be arbitrary TCP
-  # ports and multiple subbands may share one port. Recorder obtains subband,
-  # beam and window identities from spectrum_header, not from the port number.
-  # It does NOT configure the fixed 100G DPDK input UDP ports.
-  # DPDK port 0, UDP 60000/60001: beam A, V/H.
+  # Ordered A/B pairs; each entry receives V/H over the fixed UDP pair below.
+  # port is the independent ZeroMQ/TCP result destination, not an input port.
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60000/60001 (V/H).
+  # Global subband 0, beam A; IF input reference 384-640 MHz.
   - gpu_id: 0
     enable: true
-    beam: A # spectrum_header beam_id=0
-    start_freq: 384e6
-    end_freq: 640e6
-    port: 60000 # result destination ZeroMQ/TCP port
+    beam: A
+    start_freq: 29984e6
+    end_freq: 30240e6
+    port: 60000
     windows:
-      - center_freq: 512e6
-  # DPDK port 0, UDP 60002/60003: beam B, V/H.
+      - center_freq: 30112e6
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60002/60003 (V/H).
+  # Global subband 0, beam B; IF input reference 384-640 MHz.
   - gpu_id: 0
     enable: true
-    beam: B # spectrum_header beam_id=1
-    start_freq: 384e6
-    end_freq: 640e6
-    port: 60001 # result destination ZeroMQ/TCP port
+    beam: B
+    start_freq: 29984e6
+    end_freq: 30240e6
+    port: 60001
     windows:
-      - center_freq: 512e6
-  # DPDK port 0, UDP 60004/60005: beam A, V/H.
+      - center_freq: 30112e6
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60004/60005 (V/H).
+  # Global subband 1, beam A; IF input reference 640-896 MHz.
   - gpu_id: 1
     enable: true
-    beam: A # spectrum_header beam_id=0
-    start_freq: 640e6
-    end_freq: 896e6
-    port: 60002 # result destination ZeroMQ/TCP port
+    beam: A
+    start_freq: 30240e6
+    end_freq: 30496e6
+    port: 60002
     windows:
-      - center_freq: 768e6
-  # DPDK port 0, UDP 60006/60007: beam B, V/H.
+      - center_freq: 30368e6
+  # GPU0 / server1: ETH0=10.17.16.11, DPDK port 0, UDP 60006/60007 (V/H).
+  # Global subband 1, beam B; IF input reference 640-896 MHz.
   - gpu_id: 1
     enable: true
-    beam: B # spectrum_header beam_id=1
-    start_freq: 640e6
-    end_freq: 896e6
-    port: 60003 # result destination ZeroMQ/TCP port
+    beam: B
+    start_freq: 30240e6
+    end_freq: 30496e6
+    port: 60003
     windows:
-      - center_freq: 768e6
-  # DPDK port 1, UDP 60000/60001: beam A, V/H.
+      - center_freq: 30368e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60000/60001 (V/H).
+  # Global subband 2, beam A; IF input reference 896-1152 MHz.
   - gpu_id: 2
     enable: true
-    beam: A # spectrum_header beam_id=0
-    start_freq: 896e6
-    end_freq: 1152e6
-    port: 60004 # result destination ZeroMQ/TCP port
+    beam: A
+    start_freq: 30496e6
+    end_freq: 30752e6
+    port: 60004
     windows:
-      - center_freq: 1024e6
-  # DPDK port 1, UDP 60002/60003: beam B, V/H.
+      - center_freq: 30624e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60002/60003 (V/H).
+  # Global subband 2, beam B; IF input reference 896-1152 MHz.
   - gpu_id: 2
     enable: true
-    beam: B # spectrum_header beam_id=1
-    start_freq: 896e6
-    end_freq: 1152e6
-    port: 60005 # result destination ZeroMQ/TCP port
+    beam: B
+    start_freq: 30496e6
+    end_freq: 30752e6
+    port: 60005
     windows:
-      - center_freq: 1024e6
-  # DPDK port 1, UDP 60004/60005: beam A, V/H.
+      - center_freq: 30624e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60004/60005 (V/H).
+  # Global subband 3, beam A; IF input reference 1152-1408 MHz.
   - gpu_id: 3
     enable: true
-    beam: A # spectrum_header beam_id=0
-    start_freq: 1152e6
-    end_freq: 1408e6
-    port: 60006 # result destination ZeroMQ/TCP port
+    beam: A
+    start_freq: 30752e6
+    end_freq: 31008e6
+    port: 60006
     windows:
-      - center_freq: 1280e6
-  # DPDK port 1, UDP 60006/60007: beam B, V/H.
+      - center_freq: 30880e6
+  # GPU0 / server1: ETH1=10.17.16.12, DPDK port 1, UDP 60006/60007 (V/H).
+  # Global subband 3, beam B; IF input reference 1152-1408 MHz.
   - gpu_id: 3
     enable: true
-    beam: B # spectrum_header beam_id=1
-    start_freq: 1152e6
-    end_freq: 1408e6
-    port: 60007 # result destination ZeroMQ/TCP port
+    beam: B
+    start_freq: 30752e6
+    end_freq: 31008e6
+    port: 60007
     windows:
-      - center_freq: 1280e6
+      - center_freq: 30880e6

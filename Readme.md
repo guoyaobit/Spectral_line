@@ -8,6 +8,10 @@ baseband files.
 See [docs/deployment.md](docs/deployment.md) for host preparation, build,
 configuration, and start-up checks.
 
+See [the server/subband allocation workbook](docs/数据分配新.xlsx) for the
+supplied server-to-subband reference. This document is not loaded by the
+program; runtime settings remain in `config.yaml` and `ansible/configs/GPU*.yaml`.
+
 See [docs/result-data-format.md](docs/result-data-format.md) for the exact
 ZeroMQ result-message layout, header fields, CRC32C coverage, spectrum and
 continuum payload definitions, frequency coordinates, and receiver validation
