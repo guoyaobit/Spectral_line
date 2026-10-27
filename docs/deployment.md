@@ -23,10 +23,15 @@ streams (V/H) feed each entry. The YAML `start_freq`, `end_freq` and window
 references only; server1/server5 (and the other corresponding pairs) have
 matching IF ranges but different configured RF ranges. Window centers are
 the midpoint of their RF start/end frequencies; each bandwidth remains 256 MHz.
+The workbook allocates 33984–34080 MHz to both server4 and server5, a 96 MHz
+overlap. It is preserved in the supplied YAML; verify this overlap against the
+actual receiver allocation before combining adjacent server spectra.
 
 The SDFITS writers in both projects label these frequencies `FREQTYPE=RF`.
 Processing nodes must supply RF values; the writers do not apply an LO or
-sideband conversion. Do not add the LO again to already-RF frequency values.
+sideband conversion. Confirm that the configured RF mapping and increasing
+channel-frequency order match the actual LO and sideband. Do not add the LO
+again to already-RF frequency values.
 
 The input addresses document the hardware allocation; these YAML comments do
 not configure NIC addresses or DPDK device order. Confirm ETH0/ETH1 correspond
@@ -251,10 +256,11 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   the actual center frequency of channel 0 in `start_freq_hz`; consumers derive
   the exclusive cutoff as `start_freq_hz + n_channels * channel_bw_hz` and the
   final channel center as `start_freq_hz + (n_channels - 1) * channel_bw_hz`.
-- `subbands[].beam`: beam label `A` or `B`. Each subband can select its beam
-  independently. For compatibility with an older deployed `config.yaml`, a
-  missing value defaults to A for subbands 0–3 and B for subbands 4–7 with a
-  startup warning. Spectrum protocol version 3 writes this value to
+- `subbands[].beam`: required beam label `A` or `B`. The eight entries must
+  be ordered as four adjacent A/B pairs. Both entries in a pair must have the
+  same enabled state and, when enabled, matching frequency ranges and windows.
+  A missing or invalid beam causes configuration validation to fail.
+  Spectrum protocol version 3 writes this value to
   `spectrum_header.beam_id`, where `0` means beam A and `1` means beam B. The
   field retains its original offset. The packed header is 103 bytes, including
   an explicit integration start time; sender and Recorder must both use v3.

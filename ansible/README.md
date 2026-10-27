@@ -186,19 +186,19 @@ commented out by default, so deployment enters manual mode and all spectrum
 senders use `obs_id=0`. Uncomment the key only when the same value is also
 configured on Recorder.
 
-| Static file | ServerID | ETH0 input IPv4 | ETH0 ranges (MHz) | ETH1 input IPv4 | ETH1 ranges (MHz) |
-|---|---:|---|---|---|---|
-| `GPU0.yaml` | 0 | 10.17.16.11 | 384–640, 640–896 | 10.17.16.12 | 896–1152, 1152–1408 |
-| `GPU1.yaml` | 1 | 10.17.16.13 | 1408–1664, 1664–1920 | 10.17.16.14 | 1920–2176, 2176–2432 |
-| `GPU2.yaml` | 2 | 10.17.16.15 | 2432–2688, 2688–2944 | 10.17.16.16 | 2944–3200, 3200–3456 |
-| `GPU3.yaml` | 3 | 10.17.16.17 | 3456–3712, 3712–3968 | 10.17.16.18 | 3968–4224, 4224–4480 |
-| `GPU4.yaml` | 4 | 10.17.16.19 | 384–640, 640–896 | 10.17.16.20 | 896–1152, 1152–1408 |
-| `GPU5.yaml` | 5 | 10.17.16.21 | 1408–1664, 1664–1920 | 10.17.16.22 | 1920–2176, 2176–2432 |
-| `GPU6.yaml` | 6 | 10.17.16.23 | 2432–2688, 2688–2944 | 10.17.16.24 | 2944–3200, 3200–3456 |
-| `GPU7.yaml` | 7 | 10.17.16.25 | 3456–3712, 3712–3968 | 10.17.16.26 | 3968–4224, 4224–4480 |
+| Static file | Server / ServerID | ETH0 input IPv4 | ETH0 RF ranges (MHz) | ETH1 input IPv4 | ETH1 RF ranges (MHz) |
+|---|---|---|---|---|---|
+| `GPU0.yaml` | server1 / 0 | 10.17.16.11 | 29984–30240, 30240–30496 | 10.17.16.12 | 30496–30752, 30752–31008 |
+| `GPU1.yaml` | server2 / 1 | 10.17.16.13 | 31008–31264, 31264–31520 | 10.17.16.14 | 31520–31776, 31776–32032 |
+| `GPU2.yaml` | server3 / 2 | 10.17.16.15 | 32032–32288, 32288–32544 | 10.17.16.16 | 32544–32800, 32800–33056 |
+| `GPU3.yaml` | server4 / 3 | 10.17.16.17 | 33056–33312, 33312–33568 | 10.17.16.18 | 33568–33824, 33824–34080 |
+| `GPU4.yaml` | server5 / 4 | 10.17.16.19 | 33984–34240, 34240–34496 | 10.17.16.20 | 34496–34752, 34752–35008 |
+| `GPU5.yaml` | server6 / 5 | 10.17.16.21 | 35008–35264, 35264–35520 | 10.17.16.22 | 35520–35776, 35776–36032 |
+| `GPU6.yaml` | server7 / 6 | 10.17.16.23 | 36032–36288, 36288–36544 | 10.17.16.24 | 36544–36800, 36800–37056 |
+| `GPU7.yaml` | server8 / 7 | 10.17.16.25 | 37056–37312, 37312–37568 | 10.17.16.26 | 37568–37824, 37824–38080 |
 
-Each static file defines four 256 MHz subbands per 100G interface in this
-order:
+These ranges are RF, not IF. Each 100G interface carries two 256 MHz frequency
+bands, each represented by beams A/B (four YAML entries), in this order:
 
 | Input UDP pair | Beam | Polarisation | Frequency selection |
 |---|:---:|:---:|---|

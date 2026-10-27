@@ -1,9 +1,13 @@
 # Spectral_line
 
 High-throughput DPDK/CUDA receiver for 7 mm spectral-line observations. It
-receives VDIF-over-UDP input, performs PFB/FFT and Stokes accumulation on GPUs,
+receives VDIF-over-UDP input, performs PFB/FFT and backend-product accumulation on GPUs,
 and either sends complete spectrum results over ZeroMQ/TCP or records VDIF
 baseband files.
+
+See [the documentation index](docs/README.md) for the current configuration,
+deployment, data-format and reduction guides. Supplied configurations now use
+RF frequencies, and new native SDFITS files record `FREQTYPE=RF`.
 
 See [docs/deployment.md](docs/deployment.md) for host preparation, build,
 configuration, and start-up checks.
@@ -202,7 +206,7 @@ frequency-axis, metadata, and CLASS import workflow.
 Spectral-line mode can also save completed integrations on each processing
 node while continuing to transmit them to `Spectral_Line_Recorder`. Enable the
 `local_sdfits` block in `config.yaml`; local files use the same SDFITS template,
-binary-table columns, TDIM order, Stokes payload, noise-state field, and
+binary-table columns, TDIM order, four-component backend payload, noise-state field, and
 filename convention as Recorder output. See
 [`docs/local-sdfits.md`](docs/local-sdfits.md) for configuration and operational
 details.

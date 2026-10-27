@@ -15,7 +15,7 @@ VDIF 帧文件。
 | transport header (24 B)   | spectrum_header      | payload              |
 | version 1                 | 103 B, version 3     | mode-dependent       |
 +---------------------------+----------------------+----------------------+
-offset 0                    offset 24              offset 119
+offset 0                    offset 24              offset 127
 ```
 
 TCP/ZeroMQ 端口只负责建立连接，不表示子带编号、波束或窗口。多个子带可以共用端口，
@@ -122,7 +122,8 @@ channel 1: float4[0], float4[1], float4[2], float4[3]
 
 这些值是积分周期内的累加和，当前不会在发送前除以 FFT 次数或做归一化。虽然字段名
 `stokes` 当前为 `4`，payload 仍是上表中的四个原始累加量，并非已经换算好的标准
-Stokes `I/Q/U/V`；后续消费者如需 IQUV，必须按系统采用的极化定义和符号约定转换。
+Stokes `I/Q/U/V`。当前没有 `output_type` 配置项；类型 3 的历史计算保持不变。
+不得将最后两个分量直接当作标准复交叉相关的实部/虚部来转换 IQUV。
 
 第 `k` 个通道的中心频率和窗口高端边界为：
 

@@ -12,7 +12,7 @@ Enable this block in `config.yaml`:
 
 ```yaml
 observation_mode: 1
-Observation_ID: 20260920T011500Z_0033+636_ON
+Observation_ID: 20260920T011500Z_0033_636_ON
 object: 0033+636
 source_on: true
 
@@ -26,6 +26,8 @@ local_sdfits:
 be identical on every processing node and on the Recorder. The local directory
 is `<storage_folder>/<Observation_ID>/`. `storage_folder` defaults to `/data`
 when omitted, so the default output is `/data/<Observation_ID>/`.
+IDs accept 1–64 ASCII letters, digits, `.`, `_` and `-`, except `.` and `..`;
+the source `object` may retain `+`, but the observation ID may not.
 
 If `Observation_ID` is omitted, the processing node creates a UTC directory
 name locally. This is suitable for manual tests, but its creation time may not
@@ -33,7 +35,9 @@ exactly match the directory independently created by the Recorder.
 
 The top-level `object` and `source_on` keys match Recorder. `source_on`
 controls the `ON` or `OFF` filename component and SDFITS `SRCSTATE`. Set it to `false`
-for the reference-sky scan. `queue_mb` bounds pending local data; when the disk
+for the reference-sky scan. `queue_mb` is a shared queue limit in MiB for all
+local subband/beam/window files, not a per-file allocation or disk write batch
+size. The default 2048 means 2 GiB of queued payload. When the disk
 cannot keep up and the queue becomes full, the processing stream continues and
 the omitted local row is reported in the log.
 
@@ -46,11 +50,15 @@ and frequency is axis 3. `NCHAN`, `NSUBBAND`, and `NPOL` are retained, so the
 existing `make_class_onoff.py` needs no changes.
 
 `CRPIX3=1` is fixed for every row and `CRVAL3` is the first channel centre in
-Hz. `OBSFREQ` remains the backend band centre. `FREQTYPE=IF` makes explicit that
-these are intermediate frequencies: provide LO/sideband information during
-offline reduction to derive sky frequencies or velocities. DATA is uncalibrated accumulated power, with
+Hz. `OBSFREQ` is the configured RF band centre and new files use `FREQTYPE=RF`.
+Both writers expect RF values from processing nodes and perform no LO/sideband
+conversion. Do not add the LO again during reduction. Historical IF files still
+need their actual LO/sideband setup. DATA is uncalibrated accumulated power, with
 unknown `TSYS` and `TCAL` left undefined. `TIME` is explicitly in MJD days with
-`MJDREF=0`; it retains the project's time convention.
+`MJDREF=0`. Row `TIME` is the explicit PFB-corrected integration start; the
+first row also determines `DATE-OBS`, `MJD-OBS` and `STTMJD`. It is not computed
+as centre time minus half of the live exposure, since switched integrations
+can span gaps.
 
 The product axis is `CORRPROD`, with `POLPROD1..4` identifying `XX`, `YY`,
 `Re(X)*Im(Y)` and `Im(X)*Re(Y)`. The last two are backend products, not complete
