@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -46,8 +47,10 @@ extern "C" __global__ void stokes_IQUV_accumulate(complexf *__restrict__ A, //
                                                   float4 *pf4SumStokes) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= N) return;
-  cuFloatComplex x = A[idx];
-  cuFloatComplex y = B[idx];
+  // Read the unshifted FFT directly, preserving the existing output order.
+  const size_t fft_idx = idx < N / 2 ? idx + N / 2 : idx - N / 2;
+  cuFloatComplex x = A[fft_idx];
+  cuFloatComplex y = B[fft_idx];
 
   float x_re = x.x;
   float x_im = x.y;
@@ -110,17 +113,6 @@ extern "C" __global__ void uint8_offsetIQ_to_ring(const uint8_t *__restrict__ sr
   size_t ring_idx = (head + idx) % W;
   gpuRing[ring_idx] = make_float2(re, im);
 }
-__global__ void fftshift_1d(complexf *data, int N) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < N / 2)
-
-  {
-    complexf tmp = data[idx];
-    data[idx] = data[idx + (N / 2)];
-    data[idx + (N / 2)] = tmp;
-  }
-}
-
 extern "C" __global__
 void continuum_power_accumulate(
     const complexf* __restrict__ A,
@@ -138,11 +130,13 @@ void continuum_power_accumulate(
 
     if (idx < N)
     {
-        const float ax = A[idx].x;
-        const float ay = A[idx].y;
+        // Keep the previous shifted-bin reduction order as well.
+        const size_t fft_idx = idx < N / 2 ? idx + N / 2 : idx - N / 2;
+        const float ax = A[fft_idx].x;
+        const float ay = A[fft_idx].y;
 
-        const float bx = B[idx].x;
-        const float by = B[idx].y;
+        const float bx = B[fft_idx].x;
+        const float by = B[fft_idx].y;
 
         power =
             fmaf(ax, ax, ay * ay) +
@@ -219,11 +213,11 @@ public:
     // Stokes accumulation and device-to-host stream.
     CUDA_CHECK(cudaStreamCreateWithFlags(&sD2H, cudaStreamNonBlocking));
 
-    // allocate device buffers:
-    CUDA_CHECK(cudaMalloc((void **)&m_rawA, m_Nfft * 2)); // rawdata formart unit8 re+imag
-    CUDA_CHECK(cudaMemset(m_rawA, 0, m_Nfft * 2));
-    CUDA_CHECK(cudaMalloc((void **)&m_rawB, m_Nfft * 2)); // rawdata formart unit8 re+imag
-    CUDA_CHECK(cudaMemset(m_rawB, 0, m_Nfft * 2));
+    // Raw inputs and FFT outputs alternate between two pipeline slots.
+    for (size_t i = 0; i < PIPELINE_SLOTS; ++i) {
+      CUDA_CHECK(cudaMalloc((void **)&m_rawA[i], m_Nfft * 2));
+      CUDA_CHECK(cudaMalloc((void **)&m_rawB[i], m_Nfft * 2));
+    }
 
     size_t device_input_bytes = m_Nfft*m_num_taps * sizeof(complexf); // after conversion int8->float complex
     m_pfb_ringsize = m_Nfft * m_num_taps;
@@ -241,10 +235,10 @@ public:
     CUDA_CHECK(cudaMemset(m_d_pfbedB, 0, device_pfbed_bytes));
     
     // fft result
-    CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsA, device_pfbed_bytes)); // m_Nfft complexf
-    CUDA_CHECK(cudaMemset(m_ffted_bufsA, 0, device_pfbed_bytes));
-    CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsB, device_pfbed_bytes)); // m_Nfft complexf
-    CUDA_CHECK(cudaMemset(m_ffted_bufsB, 0, device_pfbed_bytes));
+    for (size_t i = 0; i < PIPELINE_SLOTS; ++i) {
+      CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsA[i], device_pfbed_bytes));
+      CUDA_CHECK(cudaMalloc((void **)&m_ffted_bufsB[i], device_pfbed_bytes));
+    }
     
     // stokes accumulate result
     CUDA_CHECK(cudaMalloc((void **)&m_acc_stokes_ON, m_Nfft * sizeof(float4)));
@@ -270,11 +264,15 @@ public:
     CUFFT_CHECK(cufftPlan1d(&m_planB, static_cast<int>(m_Nfft), CUFFT_C2C, 1));
     CUFFT_CHECK(cufftSetStream(m_planB, sPFBB));
     // events for stream sync
-    CUDA_CHECK(cudaEventCreate(&evtH2DA_done));
-    CUDA_CHECK(cudaEventCreate(&evtH2DB_done));
-
-    CUDA_CHECK(cudaEventCreate(&evtPFBA_done));
-    CUDA_CHECK(cudaEventCreate(&evtPFBB_done));
+    for (size_t i = 0; i < PIPELINE_SLOTS; ++i) {
+      CUDA_CHECK(cudaEventCreateWithFlags(&evtH2DA_done[i], cudaEventDisableTiming));
+      CUDA_CHECK(cudaEventCreateWithFlags(&evtH2DB_done[i], cudaEventDisableTiming));
+      CUDA_CHECK(cudaEventCreateWithFlags(&evtRawA_consumed[i], cudaEventDisableTiming));
+      CUDA_CHECK(cudaEventCreateWithFlags(&evtRawB_consumed[i], cudaEventDisableTiming));
+      CUDA_CHECK(cudaEventCreateWithFlags(&evtPFBA_done[i], cudaEventDisableTiming));
+      CUDA_CHECK(cudaEventCreateWithFlags(&evtPFBB_done[i], cudaEventDisableTiming));
+      CUDA_CHECK(cudaEventCreateWithFlags(&evtAccum_done[i], cudaEventDisableTiming));
+    }
 
     m_acc_len = cfg.integration_blocks();
     // result on host ring buffer
@@ -494,9 +492,6 @@ public:
   }  
   bool accumulate_one_block() {
     auto &cfg = GlobalConfig::getInstance();
-    // StokesAcc always queues waits for both FFT streams, even on skipped
-    // blocks. Completing it also completes all upstream buffer readers.
-    CUDA_CHECK(cudaStreamSynchronize(sD2H));
     PacketBatch *readblockA = nullptr;
     PacketBatch *readblockB = nullptr;
 
@@ -557,12 +552,18 @@ public:
     if (m_pfb_invalid_blocks_remaining != 0)
       --m_pfb_invalid_blocks_remaining;
 
-    CUDA_CHECK(cudaMemcpyAsync(m_rawA, readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA));
-    CUDA_CHECK(cudaEventRecord(evtH2DA_done, sH2DA));
-    CUDA_CHECK(cudaMemcpyAsync(m_rawB, readblockB->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DB));
-    CUDA_CHECK(cudaEventRecord(evtH2DB_done, sH2DB));
-    CUDA_CHECK(cudaEventSynchronize(evtH2DA_done));
-    CUDA_CHECK(cudaEventSynchronize(evtH2DB_done));
+    if (m_pipeline_used[m_pipeline_slot]) {
+      CUDA_CHECK(cudaStreamWaitEvent(sH2DA, evtRawA_consumed[m_pipeline_slot], 0));
+      CUDA_CHECK(cudaStreamWaitEvent(sH2DB, evtRawB_consumed[m_pipeline_slot], 0));
+    }
+    CUDA_CHECK(cudaMemcpyAsync(m_rawA[m_pipeline_slot], readblockA->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DA));
+    CUDA_CHECK(cudaEventRecord(evtH2DA_done[m_pipeline_slot], sH2DA));
+    CUDA_CHECK(cudaMemcpyAsync(m_rawB[m_pipeline_slot], readblockB->buffer, m_Nfft * 2, cudaMemcpyHostToDevice, sH2DB));
+    CUDA_CHECK(cudaEventRecord(evtH2DB_done[m_pipeline_slot], sH2DB));
+    // The receive pool reserves one consumer-owned batch per stream. Finish
+    // reading it before dequeuing another; only H2D is waited on, not compute.
+    CUDA_CHECK(cudaEventSynchronize(evtH2DA_done[m_pipeline_slot]));
+    CUDA_CHECK(cudaEventSynchronize(evtH2DB_done[m_pipeline_slot]));
     return true;
   }
   void submit_PFB_FFT() {
@@ -570,28 +571,32 @@ public:
     int blockSize = 256;
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
-    CUDA_CHECK(cudaStreamWaitEvent(sPFBA, evtH2DA_done, 0));
-    CUDA_CHECK(cudaStreamWaitEvent(sPFBB, evtH2DB_done, 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sPFBA, evtH2DA_done[m_pipeline_slot], 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sPFBB, evtH2DB_done[m_pipeline_slot], 0));
     //int8 -> complexf input: m_rawA, m_rawB output: m_d_inputA, m_d_inputB
-    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sPFBA>>>(m_rawA, m_d_inputA, m_Nfft, m_pfb_head, m_pfb_ringsize);
+    // Each polarization's shared PFB history and scratch buffer are protected
+    // by its compute stream: the previous PFB/FFT finishes before conversion.
+    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sPFBA>>>(m_rawA[m_pipeline_slot], m_d_inputA, m_Nfft, m_pfb_head, m_pfb_ringsize);
     CUDA_CHECK(cudaGetLastError());
-    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sPFBB>>>(m_rawB, m_d_inputB, m_Nfft, m_pfb_head, m_pfb_ringsize);
+    CUDA_CHECK(cudaEventRecord(evtRawA_consumed[m_pipeline_slot], sPFBA));
+    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sPFBB>>>(m_rawB[m_pipeline_slot], m_d_inputB, m_Nfft, m_pfb_head, m_pfb_ringsize);
     CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaEventRecord(evtRawB_consumed[m_pipeline_slot], sPFBB));
     m_pfb_head = (m_pfb_head + m_Nfft) % m_pfb_ringsize;
     // Same-stream ordering makes conversion visible to the 4-tap PFB.
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBA>>>(m_d_inputA, m_filters, m_d_pfbedA, m_Nfft, m_num_taps, m_pfb_head);
     CUDA_CHECK(cudaGetLastError());
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBB>>>(m_d_inputB, m_filters, m_d_pfbedB, m_Nfft, m_num_taps, m_pfb_head);
     CUDA_CHECK(cudaGetLastError());
-    // DO FFT
-    CUFFT_CHECK(cufftExecC2C(m_planA, m_d_pfbedA, m_ffted_bufsA, CUFFT_FORWARD));
-    fftshift_1d<<<gridSize, blockSize, 0, sPFBA>>>(m_ffted_bufsA, m_Nfft);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaEventRecord(evtPFBA_done, sPFBA));
-    CUFFT_CHECK(cufftExecC2C(m_planB, m_d_pfbedB, m_ffted_bufsB, CUFFT_FORWARD));
-    fftshift_1d<<<gridSize, blockSize, 0, sPFBB>>>(m_ffted_bufsB, m_Nfft);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaEventRecord(evtPFBB_done, sPFBB));
+    // Reuse an FFT output only after the previous accumulation read it.
+    if (m_pipeline_used[m_pipeline_slot]) {
+      CUDA_CHECK(cudaStreamWaitEvent(sPFBA, evtAccum_done[m_pipeline_slot], 0));
+      CUDA_CHECK(cudaStreamWaitEvent(sPFBB, evtAccum_done[m_pipeline_slot], 0));
+    }
+    CUFFT_CHECK(cufftExecC2C(m_planA, m_d_pfbedA, m_ffted_bufsA[m_pipeline_slot], CUFFT_FORWARD));
+    CUDA_CHECK(cudaEventRecord(evtPFBA_done[m_pipeline_slot], sPFBA));
+    CUFFT_CHECK(cufftExecC2C(m_planB, m_d_pfbedB, m_ffted_bufsB[m_pipeline_slot], CUFFT_FORWARD));
+    CUDA_CHECK(cudaEventRecord(evtPFBB_done[m_pipeline_slot], sPFBB));
   }
 
   // Single GPU producer: a used slot belongs to the sender until it releases it.
@@ -622,13 +627,23 @@ public:
   }
 
   void StokesAcc() {
+    accumulate_current_fft();
+    // Record completion on every path, including invalid/blank/full-ring
+    // returns, before this slot can be reused two blocks later.
+    CUDA_CHECK(cudaEventRecord(evtAccum_done[m_pipeline_slot], sD2H));
+    m_pipeline_used[m_pipeline_slot] = true;
+    m_pipeline_slot = (m_pipeline_slot + 1) % PIPELINE_SLOTS;
+  }
+
+private:
+  void accumulate_current_fft() {
     auto &cfg = GlobalConfig::getInstance();
 
     int blockSize = 256;
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
-    CUDA_CHECK(cudaStreamWaitEvent(sD2H, evtPFBA_done, 0));
-    CUDA_CHECK(cudaStreamWaitEvent(sD2H, evtPFBB_done, 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sD2H, evtPFBA_done[m_pipeline_slot], 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sD2H, evtPFBB_done[m_pipeline_slot], 0));
     if (!m_current_pfb_output_valid) {
       if (!m_accumulators_reset_for_gap) {
         if (cfg.observation_mode == ObservationMode::SPECTRAL) {
@@ -663,11 +678,11 @@ public:
         }
         m_acc_on_id++;
         if (cfg.observation_mode == ObservationMode::SPECTRAL) {
-          stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_ON);
+          stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA[m_pipeline_slot], m_ffted_bufsB[m_pipeline_slot], m_Nfft, m_acc_stokes_ON);
           CUDA_CHECK(cudaGetLastError());
         }
         if (cfg.observation_mode == ObservationMode::CONTINUUM) {
-          continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_ON);
+          continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA[m_pipeline_slot], m_ffted_bufsB[m_pipeline_slot], m_Nfft, d_sumPower_ON);
           CUDA_CHECK(cudaGetLastError());
         }
 
@@ -712,11 +727,11 @@ public:
         }
         m_acc_off_id++;
         if (cfg.observation_mode == ObservationMode::SPECTRAL) {
-          stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
+          stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA[m_pipeline_slot], m_ffted_bufsB[m_pipeline_slot], m_Nfft, m_acc_stokes_OFF);
           CUDA_CHECK(cudaGetLastError());
         }
         if (cfg.observation_mode == ObservationMode::CONTINUUM) {
-          continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
+          continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA[m_pipeline_slot], m_ffted_bufsB[m_pipeline_slot], m_Nfft, d_sumPower_OFF);
           CUDA_CHECK(cudaGetLastError());
         }
         
@@ -758,11 +773,11 @@ public:
       }
       m_acc_id++;
       if (cfg.observation_mode == ObservationMode::SPECTRAL) {
-        stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
+        stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA[m_pipeline_slot], m_ffted_bufsB[m_pipeline_slot], m_Nfft, m_acc_stokes_OFF);
         CUDA_CHECK(cudaGetLastError());
       }
       if (cfg.observation_mode == ObservationMode::CONTINUUM) {
-        continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
+        continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA[m_pipeline_slot], m_ffted_bufsB[m_pipeline_slot], m_Nfft, d_sumPower_OFF);
         CUDA_CHECK(cudaGetLastError());
       }
       if (m_acc_id >= m_acc_len) {
@@ -795,8 +810,11 @@ private:
   size_t m_num_taps = 4;// PFB taps
 
   // device buffers
-  uint8_t *m_rawA = nullptr;// rawdata formart unit8 re+imag
-  uint8_t *m_rawB = nullptr;
+  static constexpr size_t PIPELINE_SLOTS = 2;
+  size_t m_pipeline_slot = 0;
+  std::array<bool, PIPELINE_SLOTS> m_pipeline_used{};
+  std::array<uint8_t *, PIPELINE_SLOTS> m_rawA{};
+  std::array<uint8_t *, PIPELINE_SLOTS> m_rawB{};
   // input
   complexf *m_d_inputA = nullptr; // num_taps*m_Nfft complexf (after int8->float conversion)
   complexf *m_d_inputB = nullptr;
@@ -804,7 +822,7 @@ private:
   size_t m_pfb_head = 0; // head points to the oldest sample of current PFB window
   // PFB
   float *m_filters = nullptr;     // num_taps*m_Nfft complexf, point to pbf window coefficients
-  complexf *m_d_pfbedA = nullptr; // m_Nfft complexf (PFB output then FFT in-place)
+  complexf *m_d_pfbedA = nullptr; // Shared PFB scratch; FFT output is double-buffered.
   complexf *m_d_pfbedB = nullptr;
 
   // sum power for continuum
@@ -820,12 +838,14 @@ private:
 
   cudaStream_t sD2H;
 
-  cudaEvent_t evtH2DA_done, evtH2DB_done;
-  cudaEvent_t evtPFBA_done, evtPFBB_done;
+  std::array<cudaEvent_t, PIPELINE_SLOTS> evtH2DA_done{}, evtH2DB_done{};
+  std::array<cudaEvent_t, PIPELINE_SLOTS> evtRawA_consumed{}, evtRawB_consumed{};
+  std::array<cudaEvent_t, PIPELINE_SLOTS> evtPFBA_done{}, evtPFBB_done{};
+  std::array<cudaEvent_t, PIPELINE_SLOTS> evtAccum_done{};
 
   // FFT results
-  cufftComplex *m_ffted_bufsA;
-  cufftComplex *m_ffted_bufsB;
+  std::array<cufftComplex *, PIPELINE_SLOTS> m_ffted_bufsA{};
+  std::array<cufftComplex *, PIPELINE_SLOTS> m_ffted_bufsB{};
   // stockes and ACC
   float4 *m_acc_stokes_ON;
   float4 *m_acc_stokes_OFF;
