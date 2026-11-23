@@ -168,7 +168,7 @@ public:
 
     // Advance before checking writability so a mid-run disconnect remains
     // visible as a sequence gap after the Writer reconnects. Avoid allocating,
-    // copying, and checksumming a large result when no peer can accept it.
+    // and copying a large result when no peer can accept it.
     const uint64_t sequence = next_sequence_++;
     if (!wait_until_writable(0))
       return false;
@@ -200,7 +200,6 @@ public:
     uint8_t *body = message_data + sizeof(*transport);
     std::memcpy(body, &header, sizeof(header));
     std::memcpy(body + sizeof(header), payload, payload_len);
-    transport->crc32c = spectrum_crc32c(body, body_bytes);
 
     const int sent = zmq_msg_send(&message, socket_, ZMQ_DONTWAIT);
     const bool complete =

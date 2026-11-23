@@ -13,7 +13,7 @@ VDIF 帧文件。
 ```text
 +---------------------------+----------------------+----------------------+
 | transport header (24 B)   | spectrum_header      | payload              |
-| version 1                 | 103 B, version 3     | mode-dependent       |
+| version 2                 | 103 B, version 3     | mode-dependent       |
 +---------------------------+----------------------+----------------------+
 offset 0                    offset 24              offset 127
 ```
@@ -41,15 +41,15 @@ GPU 到发送线程的结果环形队列满时，处理端记录日志并丢弃�
 | 偏移 | 长度 | 类型 | 字段 | 说明 |
 |---:|---:|---|---|---|
 | 0 | 4 | `uint32_t` | `magic` | 固定为 `0x534C5A31`（标识 `SLZ1`） |
-| 4 | 2 | `uint16_t` | `version` | 当前为 `1` |
+| 4 | 2 | `uint16_t` | `version` | 当前为 `2` |
 | 6 | 2 | `uint16_t` | `server_id` | 发送服务器编号，当前有效范围 `0–7` |
 | 8 | 8 | `uint64_t` | `sequence` | 发送进程内单调递增序号 |
 | 16 | 4 | `uint32_t` | `message_bytes` | 后续 body 长度，即 `103 + payload_bytes`，不含本头 |
-| 20 | 4 | `uint32_t` | `crc32c` | 后续 body 的 CRC32C |
+| 20 | 4 | `uint32_t` | `reserved` | 保留，固定为 `0` |
 
-CRC 使用 CRC-32C/Castagnoli，反射多项式 `0x82F63B78`，初始值
-`0xffffffff`，结束时按位取反。校验范围从 `spectrum_header` 第一个字节到 payload
-最后一个字节，不包含 transport header。
+传输版本 2 不计算或校验消息 CRC32C。发送端与 Recorder 必须配套更新；
+版本 1 消息不再接受。消息头和 payload 长度检查、数据身份和序号检查保留。
+`Observation_ID` 的一次性 CRC32C 编号计算保持不变。
 
 `sequence` 在每次发送尝试时递增，因此序号缺口可能表示 Writer 不可用、发送队列已满
 或链路中断时发送端主动丢弃了完整结果。Recorder 按
@@ -161,7 +161,7 @@ Recorder 应先按消息头的 `subband_id`、`beam_id`、`timestamp_ns` 等身�
 
 1. ZeroMQ message 至少为 `24 + 103` 字节，并且总长度等于
    `24 + transport.message_bytes`。
-2. transport `magic/version`、`server_id` 和 body CRC32C 正确。
+2. transport `magic/version`、`server_id` 正确，`reserved` 为 `0`。
 3. spectrum `magic/version` 正确，且 `pkt_id == 0`、`total_pkt == 1`。
 4. `subband_id <= 31`、`beam_id <= 1`、`n_channels > 0`，并验证
    `subband_id / 4 == server_id`。
@@ -171,7 +171,7 @@ Recorder 应先按消息头的 `subband_id`、`beam_id`、`timestamp_ns` 等身�
 
 ## Python 解码布局示例
 
-下面只展示结构拆包；生产接收程序仍必须执行长度、版本和 CRC 校验：
+下面只展示结构拆包；生产接收程序仍必须执行长度、版本和数据身份校验：
 
 ```python
 import struct

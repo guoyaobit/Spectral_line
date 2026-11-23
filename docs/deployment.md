@@ -74,7 +74,7 @@ source port.
 
 The binary result protocol is documented in
 [result-data-format.md](result-data-format.md), including the packed headers,
-CRC32C coverage, spectral/continuum payloads, and the receiver-side identity
+transport validation, spectral/continuum payloads, and the receiver-side identity
 and length checks.
 
 ## Host prerequisites

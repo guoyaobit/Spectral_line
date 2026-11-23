@@ -212,11 +212,7 @@ public:
     CUDA_CHECK(cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking));
     CUDA_CHECK(cudaStreamCreateWithFlags(&sH2DB, cudaStreamNonBlocking));
 
-    // Sample conversion streams.
-    CUDA_CHECK(cudaStreamCreateWithFlags(&sConvA, cudaStreamNonBlocking));
-    CUDA_CHECK(cudaStreamCreateWithFlags(&sConvB, cudaStreamNonBlocking));
-
-    // PFB + FFT streams
+    // Per-polarization conversion + PFB + FFT streams.
     CUDA_CHECK(cudaStreamCreateWithFlags(&sPFBA, cudaStreamNonBlocking));
     CUDA_CHECK(cudaStreamCreateWithFlags(&sPFBB, cudaStreamNonBlocking));
 
@@ -276,9 +272,6 @@ public:
     // events for stream sync
     CUDA_CHECK(cudaEventCreate(&evtH2DA_done));
     CUDA_CHECK(cudaEventCreate(&evtH2DB_done));
-
-    CUDA_CHECK(cudaEventCreate(&evtConvA_done));
-    CUDA_CHECK(cudaEventCreate(&evtConvB_done));
 
     CUDA_CHECK(cudaEventCreate(&evtPFBA_done));
     CUDA_CHECK(cudaEventCreate(&evtPFBB_done));
@@ -577,21 +570,17 @@ public:
     int blockSize = 256;
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
-    CUDA_CHECK(cudaStreamWaitEvent(sConvA, evtH2DA_done, 0));
-    CUDA_CHECK(cudaStreamWaitEvent(sConvB, evtH2DB_done, 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sPFBA, evtH2DA_done, 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sPFBB, evtH2DB_done, 0));
     //int8 -> complexf input: m_rawA, m_rawB output: m_d_inputA, m_d_inputB
-    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvA>>>(m_rawA, m_d_inputA, m_Nfft, m_pfb_head, m_pfb_ringsize);
+    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sPFBA>>>(m_rawA, m_d_inputA, m_Nfft, m_pfb_head, m_pfb_ringsize);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaEventRecord(evtConvA_done, sConvA));
-    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvB>>>(m_rawB, m_d_inputB, m_Nfft, m_pfb_head, m_pfb_ringsize);
+    uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sPFBB>>>(m_rawB, m_d_inputB, m_Nfft, m_pfb_head, m_pfb_ringsize);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaEventRecord(evtConvB_done, sConvB));
     m_pfb_head = (m_pfb_head + m_Nfft) % m_pfb_ringsize;
-    // 4 TAPS PFB
-    CUDA_CHECK(cudaStreamWaitEvent(sPFBA, evtConvA_done, 0));
+    // Same-stream ordering makes conversion visible to the 4-tap PFB.
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBA>>>(m_d_inputA, m_filters, m_d_pfbedA, m_Nfft, m_num_taps, m_pfb_head);
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaStreamWaitEvent(sPFBB, evtConvB_done, 0));
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBB>>>(m_d_inputB, m_filters, m_d_pfbedB, m_Nfft, m_num_taps, m_pfb_head);
     CUDA_CHECK(cudaGetLastError());
     // DO FFT
@@ -827,13 +816,11 @@ private:
   // CUDA streams
 
   cudaStream_t sH2DA, sH2DB;
-  cudaStream_t sConvA, sConvB;
   cudaStream_t sPFBA, sPFBB;
 
   cudaStream_t sD2H;
 
   cudaEvent_t evtH2DA_done, evtH2DB_done;
-  cudaEvent_t evtConvA_done, evtConvB_done;
   cudaEvent_t evtPFBA_done, evtPFBB_done;
 
   // FFT results
