@@ -101,5 +101,18 @@ int main()
         automatic_id[15] != '.' || automatic_id.back() != 'Z')
         return 16;
 
+    constexpr double boundary = 0.126208;
+    constexpr int fft_size = 65536, sample_rate = 256000000;
+    if (integration_fft_count(boundary, fft_size, sample_rate) != 493 ||
+        fft_integration_seconds(493, fft_size, sample_rate) != boundary)
+        return 17;
+    if (integration_fft_count(std::nextafter(boundary, 0.0),
+                              fft_size, sample_rate) != 492)
+        return 18;
+    if (integration_fft_count(std::nextafter(boundary, 1.0),
+                              fft_size, sample_rate) != 493 ||
+        integration_fft_count(0.000001, fft_size, sample_rate) != 1)
+        return 19;
+
     return 0;
 }

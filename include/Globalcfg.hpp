@@ -8,6 +8,8 @@
 #include <ObservationId.hpp>
 #include <SpectrumSender.hpp>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <condition_variable>
 #include <filesystem>
 #include <iomanip>
@@ -16,6 +18,7 @@
 #include <mutex>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <thread>
+#include <timing.hpp>
 #include <vdif.hpp>
 #include <vector>
 #include <yaml-cpp/yaml.h>
@@ -75,6 +78,31 @@ struct NoiseSourceConfig {
   double period_ms = 1000.0;
   double duty_cycle = 50.0;
   double transition_blank_ms = 10.0;
+  uint64_t period_ns = 1000000000ULL;
+  uint64_t on_ns = 500000000ULL;
+  uint64_t blank_ns = 10000000ULL;
+
+  static uint64_t milliseconds_to_ns(double value, const char *name) {
+    const double ns = value * 1000000.0;
+    if (!std::isfinite(value) || value < 0.0 || !std::isfinite(ns) ||
+        static_cast<long double>(ns) >=
+            static_cast<long double>(std::numeric_limits<uint64_t>::max()))
+      throw std::runtime_error(std::string(name) + " must be finite, non-negative and fit in nanoseconds");
+    return static_cast<uint64_t>(ns);
+  }
+
+  void validate() {
+    period_ns = milliseconds_to_ns(period_ms, "noise_source.period_ms");
+    if (period_ns == 0)
+      throw std::runtime_error("noise_source.period_ms must be at least 1 ns");
+    if (!std::isfinite(duty_cycle) || duty_cycle <= 0.0 || duty_cycle >= 100.0)
+      throw std::runtime_error("noise_source.duty_cycle must be finite and between 0 and 100");
+    const long double duration = static_cast<long double>(period_ns) * duty_cycle / 100.0L;
+    if (duration < 1.0L || duration >= static_cast<long double>(period_ns))
+      throw std::runtime_error("Noise ON and OFF durations must each be at least 1 ns");
+    on_ns = static_cast<uint64_t>(duration);
+    blank_ns = milliseconds_to_ns(transition_blank_ms, "noise_source.transition_blank_ms");
+  }
 };
 class GlobalConfig {
 public:
@@ -155,12 +183,13 @@ public:
     return static_cast<double>(total_nfft) / sampling_rate;
   }
 
-  // Round the requested integration time down to complete FFT intervals.
+  // The accumulator and spectrum header use the same whole-block count.
+  int integration_blocks() const {
+    return integration_fft_count(integration_t, total_nfft, sampling_rate);
+  }
+
   double integration_time() const {
-    int N = static_cast<int>(integration_t / fft_period());
-    if (N < 1)
-      N = 1; // Always integrate at least one FFT.
-    return N * fft_period();
+    return fft_integration_seconds(integration_blocks(), total_nfft, sampling_rate);
   }
   // Input queues and backing memory.
   size_t Memory_pool_per_stream = 64; // GB
@@ -356,6 +385,7 @@ public:
 
       if (config["integration_t"])
         integration_t = config["integration_t"].as<double>();
+      (void)integration_blocks(); // Validate before creating windows/senders.
       if (config["cal_mode"])
         cal_mode = config["cal_mode"].as<bool>();
       if (config["noise_source"]) {
@@ -372,16 +402,7 @@ public:
               ns["transition_blank_ms"].as<double>();
       }
 
-      if (noise_source.period_ms <= 0.0)
-        throw std::runtime_error("noise_source.period_ms must be > 0");
-
-      if (noise_source.duty_cycle <= 0.0 || noise_source.duty_cycle >= 100.0)
-        throw std::runtime_error(
-            "noise_source.duty_cycle must be between 0 and 100");
-
-      if (noise_source.transition_blank_ms < 0.0)
-        throw std::runtime_error(
-            "noise_source.transition_blank_ms must be >= 0");
+      noise_source.validate();
 
       if (!config["subbands"] || !config["subbands"].IsSequence()) {
         throw std::runtime_error("Configuration is missing subbands");

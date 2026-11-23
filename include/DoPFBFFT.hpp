@@ -177,6 +177,15 @@ void continuum_power_accumulate(
 }
 enum class NoiseState : uint8_t { OFF = 0, ON = 1, BLANK = 2 };
 
+inline bool uniform_noise_inputs(const std::vector<uint8_t> &a,
+                                 const std::vector<uint8_t> &b, size_t count) {
+  if (count == 0 || a.size() < count || b.size() < count || a[0] > 1)
+    return false;
+  for (size_t i = 0; i < count; ++i)
+    if (a[i] != a[0] || b[i] != a[0]) return false;
+  return true;
+}
+
 struct HostRingSlot {
   float4 *data = nullptr;
   float sumPower = 0.0f;
@@ -200,19 +209,19 @@ public:
     m_queueB = &cfg.streams[m_subband_id * 2 + 1].queue;
 
     // H2D streams
-    cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking);
-    cudaStreamCreateWithFlags(&sH2DB, cudaStreamNonBlocking);
+    CUDA_CHECK(cudaStreamCreateWithFlags(&sH2DA, cudaStreamNonBlocking));
+    CUDA_CHECK(cudaStreamCreateWithFlags(&sH2DB, cudaStreamNonBlocking));
 
     // Sample conversion streams.
-    cudaStreamCreateWithFlags(&sConvA, cudaStreamNonBlocking);
-    cudaStreamCreateWithFlags(&sConvB, cudaStreamNonBlocking);
+    CUDA_CHECK(cudaStreamCreateWithFlags(&sConvA, cudaStreamNonBlocking));
+    CUDA_CHECK(cudaStreamCreateWithFlags(&sConvB, cudaStreamNonBlocking));
 
     // PFB + FFT streams
-    cudaStreamCreateWithFlags(&sPFBA, cudaStreamNonBlocking);
-    cudaStreamCreateWithFlags(&sPFBB, cudaStreamNonBlocking);
+    CUDA_CHECK(cudaStreamCreateWithFlags(&sPFBA, cudaStreamNonBlocking));
+    CUDA_CHECK(cudaStreamCreateWithFlags(&sPFBB, cudaStreamNonBlocking));
 
     // Stokes accumulation and device-to-host stream.
-    cudaStreamCreateWithFlags(&sD2H, cudaStreamNonBlocking);
+    CUDA_CHECK(cudaStreamCreateWithFlags(&sD2H, cudaStreamNonBlocking));
 
     // allocate device buffers:
     CUDA_CHECK(cudaMalloc((void **)&m_rawA, m_Nfft * 2)); // rawdata formart unit8 re+imag
@@ -265,30 +274,22 @@ public:
     CUFFT_CHECK(cufftPlan1d(&m_planB, static_cast<int>(m_Nfft), CUFFT_C2C, 1));
     CUFFT_CHECK(cufftSetStream(m_planB, sPFBB));
     // events for stream sync
-    cudaEventCreate(&evtH2DA_done);
-    cudaEventCreate(&evtH2DB_done);
+    CUDA_CHECK(cudaEventCreate(&evtH2DA_done));
+    CUDA_CHECK(cudaEventCreate(&evtH2DB_done));
 
-    cudaEventCreate(&evtConvA_done);
-    cudaEventCreate(&evtConvB_done);
+    CUDA_CHECK(cudaEventCreate(&evtConvA_done));
+    CUDA_CHECK(cudaEventCreate(&evtConvB_done));
 
-    cudaEventCreate(&evtPFBA_done);
-    cudaEventCreate(&evtPFBB_done);
+    CUDA_CHECK(cudaEventCreate(&evtPFBA_done));
+    CUDA_CHECK(cudaEventCreate(&evtPFBB_done));
 
-    // accumlate lens
-    m_acc_len =
-        static_cast<uint32_t>(
-            std::llround(cfg.integration_time() / cfg.fft_period()));
-
-    if (m_acc_len == 0) {
-        throw std::runtime_error(
-            "integration_time must be >= fft_period");
-    }
+    m_acc_len = cfg.integration_blocks();
     // result on host ring buffer
     SLOT_SIZE = m_Nfft * sizeof(float4);
     for (auto &slot : m_hring) {
-      cudaMallocHost(reinterpret_cast<void **>(&slot.data), SLOT_SIZE);
+      CUDA_CHECK(cudaMallocHost(reinterpret_cast<void **>(&slot.data), SLOT_SIZE));
       memset(slot.data, 0, SLOT_SIZE);
-      cudaEventCreateWithFlags(&slot.event, cudaEventBlockingSync);
+      CUDA_CHECK(cudaEventCreateWithFlags(&slot.event, cudaEventBlockingSync));
     }
     std::thread pushresult([this]() { send_data(); });
     pushresult.detach();;
@@ -423,12 +424,7 @@ public:
 {
     auto &cfg = GlobalConfig::getInstance();
 
-    uint64_t period_ns =
-        cfg.noise_source.period_ms * 1000000ULL;
-
-    uint64_t on_ns =
-        static_cast<uint64_t>(
-            period_ns * cfg.noise_source.duty_cycle / 100.0);
+    const uint64_t on_ns = cfg.noise_source.on_ns;
 
 
     if(new_state != m_noise_state)
@@ -479,17 +475,9 @@ public:
           return false;
       auto &cfg = GlobalConfig::getInstance();
 
-      uint64_t period_ns =
-          cfg.noise_source.period_ms * 1000000ULL;
-
-    uint64_t on_ns =
-        static_cast<uint64_t>(
-            period_ns *
-            cfg.noise_source.duty_cycle / 100.0);
-
-      uint64_t blank_ns =
-          cfg.noise_source.transition_blank_ms *
-          1000000ULL;
+      const uint64_t period_ns = cfg.noise_source.period_ns;
+      const uint64_t on_ns = cfg.noise_source.on_ns;
+      const uint64_t blank_ns = cfg.noise_source.blank_ns;
 
       uint64_t phase =
           (timestamp_ns -
@@ -513,6 +501,9 @@ public:
   }  
   bool accumulate_one_block() {
     auto &cfg = GlobalConfig::getInstance();
+    // StokesAcc always queues waits for both FFT streams, even on skipped
+    // blocks. Completing it also completes all upstream buffer readers.
+    CUDA_CHECK(cudaStreamSynchronize(sD2H));
     PacketBatch *readblockA = nullptr;
     PacketBatch *readblockB = nullptr;
 
@@ -550,10 +541,21 @@ public:
         readblockA->hdrs[0].getSecondsFromEpoch(),
         readblockA->hdrs[0].getFrameNumber()
     );
-    if(cfg.cal_mode){
-    NoiseState new_state =
-        static_cast<NoiseState>(readblockA->noise_state[0]);
-        update_noise_state(new_state);
+    if (cfg.cal_mode) {
+      const size_t packets = static_cast<size_t>(cfg.batchsize());
+      const bool uniform = input_valid &&
+          uniform_noise_inputs(readblockA->noise_state, readblockB->noise_state, packets);
+      if (uniform) {
+        const auto state = static_cast<NoiseState>(readblockA->noise_state[0]);
+        if (state != m_last_input_noise_state)
+          m_noise_uniform_blocks = 0;
+        m_last_input_noise_state = state;
+        if (m_noise_uniform_blocks < m_num_taps) ++m_noise_uniform_blocks;
+        update_noise_state(state);
+      } else {
+        m_noise_uniform_blocks = 0;
+      }
+      m_noise_output_valid = m_noise_uniform_blocks >= m_num_taps;
     }
 
     if (!input_valid)
@@ -575,26 +577,59 @@ public:
     int blockSize = 256;
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
-    cudaStreamWaitEvent(sConvA, evtH2DA_done, 0);
-    cudaStreamWaitEvent(sConvB, evtH2DB_done, 0);
+    CUDA_CHECK(cudaStreamWaitEvent(sConvA, evtH2DA_done, 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sConvB, evtH2DB_done, 0));
     //int8 -> complexf input: m_rawA, m_rawB output: m_d_inputA, m_d_inputB
     uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvA>>>(m_rawA, m_d_inputA, m_Nfft, m_pfb_head, m_pfb_ringsize);
-    cudaEventRecord(evtConvA_done, sConvA);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaEventRecord(evtConvA_done, sConvA));
     uint8_offsetIQ_to_ring<<<gridSize, blockSize, 0, sConvB>>>(m_rawB, m_d_inputB, m_Nfft, m_pfb_head, m_pfb_ringsize);
-    cudaEventRecord(evtConvB_done, sConvB);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaEventRecord(evtConvB_done, sConvB));
     m_pfb_head = (m_pfb_head + m_Nfft) % m_pfb_ringsize;
     // 4 TAPS PFB
-    cudaStreamWaitEvent(sPFBA, evtConvA_done, 0);
+    CUDA_CHECK(cudaStreamWaitEvent(sPFBA, evtConvA_done, 0));
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBA>>>(m_d_inputA, m_filters, m_d_pfbedA, m_Nfft, m_num_taps, m_pfb_head);
-    cudaStreamWaitEvent(sPFBB, evtConvB_done, 0);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaStreamWaitEvent(sPFBB, evtConvB_done, 0));
     kernel_pfb_sum<<<gridSize, blockSize, 0, sPFBB>>>(m_d_inputB, m_filters, m_d_pfbedB, m_Nfft, m_num_taps, m_pfb_head);
+    CUDA_CHECK(cudaGetLastError());
     // DO FFT
     CUFFT_CHECK(cufftExecC2C(m_planA, m_d_pfbedA, m_ffted_bufsA, CUFFT_FORWARD));
     fftshift_1d<<<gridSize, blockSize, 0, sPFBA>>>(m_ffted_bufsA, m_Nfft);
-    cudaEventRecord(evtPFBA_done, sPFBA);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaEventRecord(evtPFBA_done, sPFBA));
     CUFFT_CHECK(cufftExecC2C(m_planB, m_d_pfbedB, m_ffted_bufsB, CUFFT_FORWARD));
     fftshift_1d<<<gridSize, blockSize, 0, sPFBB>>>(m_ffted_bufsB, m_Nfft);
-    cudaEventRecord(evtPFBB_done, sPFBB);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaEventRecord(evtPFBB_done, sPFBB));
+  }
+
+  // Single GPU producer: a used slot belongs to the sender until it releases it.
+  // Drop the new integration without touching that slot or advancing m_hhead.
+  bool discard_if_result_ring_full(bool noise_on) {
+    if (!m_hring[m_hhead].used.load(std::memory_order_acquire))
+      return false;
+    auto &cfg = GlobalConfig::getInstance();
+    cfg.logger_->warn(
+        "Dropped complete integration: subband {} GPU {} result ring full at slot {} (noise={})",
+        m_subband_id, m_config->gpu_id, m_hhead, noise_on ? "ON" : "OFF");
+    if (cfg.observation_mode == ObservationMode::SPECTRAL) {
+      CUDA_CHECK(cudaMemsetAsync(noise_on ? m_acc_stokes_ON : m_acc_stokes_OFF,
+                                0, m_Nfft * sizeof(float4), sD2H));
+    } else {
+      CUDA_CHECK(cudaMemsetAsync(noise_on ? d_sumPower_ON : d_sumPower_OFF,
+                                0, sizeof(float), sD2H));
+    }
+    if (noise_on) {
+      m_acc_on_id = 0;
+      m_acc_on_first_timestamp_ns = 0;
+    } else {
+      m_acc_off_id = 0;
+      m_acc_off_first_timestamp_ns = 0;
+    }
+    if (!cfg.cal_mode) m_acc_id = 0;
+    return true;
   }
 
   void StokesAcc() {
@@ -603,18 +638,18 @@ public:
     int blockSize = 256;
     int gridSize = (m_Nfft + blockSize - 1) / blockSize;
 
-    cudaStreamWaitEvent(sD2H, evtPFBA_done, 0);
-    cudaStreamWaitEvent(sD2H, evtPFBB_done, 0);
+    CUDA_CHECK(cudaStreamWaitEvent(sD2H, evtPFBA_done, 0));
+    CUDA_CHECK(cudaStreamWaitEvent(sD2H, evtPFBB_done, 0));
     if (!m_current_pfb_output_valid) {
       if (!m_accumulators_reset_for_gap) {
         if (cfg.observation_mode == ObservationMode::SPECTRAL) {
-          cudaMemsetAsync(m_acc_stokes_ON, 0,
-                          m_Nfft * sizeof(float4), sD2H);
-          cudaMemsetAsync(m_acc_stokes_OFF, 0,
-                          m_Nfft * sizeof(float4), sD2H);
+          CUDA_CHECK(cudaMemsetAsync(m_acc_stokes_ON, 0,
+                          m_Nfft * sizeof(float4), sD2H));
+          CUDA_CHECK(cudaMemsetAsync(m_acc_stokes_OFF, 0,
+                          m_Nfft * sizeof(float4), sD2H));
         } else {
-          cudaMemsetAsync(d_sumPower_ON, 0, sizeof(float), sD2H);
-          cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(float), sD2H);
+          CUDA_CHECK(cudaMemsetAsync(d_sumPower_ON, 0, sizeof(float), sD2H));
+          CUDA_CHECK(cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(float), sD2H));
         }
         m_acc_id = 0;
         m_acc_on_id = 0;
@@ -627,6 +662,7 @@ public:
     }
     m_accumulators_reset_for_gap = false;
     if (cfg.cal_mode) {
+      if (!m_noise_output_valid) return;
       if( is_noise_blank(m_timestamp_ns)) return;
       /*
        * Accumulate noise-source ON samples.
@@ -637,27 +673,27 @@ public:
           m_acc_on_first_timestamp_ns = m_timestamp_ns;
         }
         m_acc_on_id++;
-        if(cfg.observation_mode == ObservationMode::SPECTRAL)
-        stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_ON);
-        if(cfg.observation_mode == ObservationMode::CONTINUUM)
-        continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_ON);
+        if (cfg.observation_mode == ObservationMode::SPECTRAL) {
+          stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_ON);
+          CUDA_CHECK(cudaGetLastError());
+        }
+        if (cfg.observation_mode == ObservationMode::CONTINUUM) {
+          continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_ON);
+          CUDA_CHECK(cudaGetLastError());
+        }
 
         /*
          * Publish after one full ON integration.
          */
         if (m_acc_on_id >= m_acc_len) {
+          if (discard_if_result_ring_full(true)) return;
           m_hring[m_hhead].first_timestamp_ns =
               m_acc_on_first_timestamp_ns;
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
-          if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
-            cfg.logger_->warn(
-                "Subband {} GPU {} result ring full at slot {}",
-                m_subband_id, m_config->gpu_id, m_hhead);
-          }
           if(cfg.observation_mode == ObservationMode::SPECTRAL)
-          cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_ON, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
+          CUDA_CHECK(cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_ON, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H));
           if(cfg.observation_mode == ObservationMode::CONTINUUM)
-          cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_ON, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
+          CUDA_CHECK(cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_ON, sizeof(float), cudaMemcpyDeviceToHost, sD2H));
           m_hring[m_hhead].noise_state = NoiseState::ON;
 
           // Publish the host slot only after its asynchronous D2H copy has
@@ -667,8 +703,8 @@ public:
           CUDA_CHECK(cudaEventSynchronize(m_hring[m_hhead].event));
           m_hring[m_hhead].used.store(true, std::memory_order_release);
 
-          cudaMemsetAsync(m_acc_stokes_ON, 0, m_Nfft * sizeof(float4), sD2H);
-          cudaMemsetAsync(d_sumPower_ON, 0, sizeof(float), sD2H);
+          CUDA_CHECK(cudaMemsetAsync(m_acc_stokes_ON, 0, m_Nfft * sizeof(float4), sD2H));
+          CUDA_CHECK(cudaMemsetAsync(d_sumPower_ON, 0, sizeof(float), sD2H));
 
           m_acc_on_id = 0;
           m_acc_on_first_timestamp_ns = 0;
@@ -686,28 +722,28 @@ public:
           m_acc_off_first_timestamp_ns = m_timestamp_ns;
         }
         m_acc_off_id++;
-        if(cfg.observation_mode == ObservationMode::SPECTRAL)
-        stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
-        if(cfg.observation_mode == ObservationMode::CONTINUUM)
-        continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
+        if (cfg.observation_mode == ObservationMode::SPECTRAL) {
+          stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
+          CUDA_CHECK(cudaGetLastError());
+        }
+        if (cfg.observation_mode == ObservationMode::CONTINUUM) {
+          continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
+          CUDA_CHECK(cudaGetLastError());
+        }
         
         /*
          * Publish after one full OFF integration.
          */
         if (m_acc_off_id >= m_acc_len) {
+          if (discard_if_result_ring_full(false)) return;
           m_hring[m_hhead].first_timestamp_ns =
               m_acc_off_first_timestamp_ns;
           m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
 
-          if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
-            cfg.logger_->warn(
-                "Subband {} GPU {} result ring full at slot {}",
-                m_subband_id, m_config->gpu_id, m_hhead);
-          }
           if(cfg.observation_mode == ObservationMode::SPECTRAL)
-          cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
+          CUDA_CHECK(cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H));
           if(cfg.observation_mode == ObservationMode::CONTINUUM)
-          cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
+          CUDA_CHECK(cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(float), cudaMemcpyDeviceToHost, sD2H));
 
           m_hring[m_hhead].noise_state = NoiseState::OFF;
 
@@ -716,8 +752,8 @@ public:
           CUDA_CHECK(cudaEventSynchronize(m_hring[m_hhead].event));
           m_hring[m_hhead].used.store(true, std::memory_order_release);
 
-          cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H);
-          cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(float), sD2H);
+          CUDA_CHECK(cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H));
+          CUDA_CHECK(cudaMemsetAsync(d_sumPower_OFF, 0, sizeof(float), sD2H));
 
           m_acc_off_id = 0;
           m_acc_off_first_timestamp_ns = 0;
@@ -729,24 +765,25 @@ public:
       // no cal mode, just accumulate
       if(m_acc_id == 0)
       {
-        m_hring[m_hhead].first_timestamp_ns = m_timestamp_ns;
+        m_acc_off_first_timestamp_ns = m_timestamp_ns;
       }
       m_acc_id++;
-      if(cfg.observation_mode == ObservationMode::SPECTRAL)
-      stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
-      if(cfg.observation_mode == ObservationMode::CONTINUUM)
-      continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
+      if (cfg.observation_mode == ObservationMode::SPECTRAL) {
+        stokes_IQUV_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, m_acc_stokes_OFF);
+        CUDA_CHECK(cudaGetLastError());
+      }
+      if (cfg.observation_mode == ObservationMode::CONTINUUM) {
+        continuum_power_accumulate<<<gridSize, blockSize, 0, sD2H>>>(m_ffted_bufsA, m_ffted_bufsB, m_Nfft, d_sumPower_OFF);
+        CUDA_CHECK(cudaGetLastError());
+      }
       if (m_acc_id >= m_acc_len) {
+        if (discard_if_result_ring_full(false)) return;
+        m_hring[m_hhead].first_timestamp_ns = m_acc_off_first_timestamp_ns;
         m_hring[m_hhead].last_timestamp_ns = m_timestamp_ns;
-        if (m_hring[m_hhead].used.load(std::memory_order_acquire)) {
-          cfg.logger_->warn(
-              "Subband {} GPU {} result ring full at slot {}",
-              m_subband_id, m_config->gpu_id, m_hhead);
-        }
         if(cfg.observation_mode == ObservationMode::SPECTRAL)
-        cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H);
+        CUDA_CHECK(cudaMemcpyAsync(m_hring[m_hhead].data, m_acc_stokes_OFF, m_Nfft * sizeof(float4), cudaMemcpyDeviceToHost, sD2H));
         if(cfg.observation_mode == ObservationMode::CONTINUUM)
-        cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(float), cudaMemcpyDeviceToHost, sD2H);
+        CUDA_CHECK(cudaMemcpyAsync(&m_hring[m_hhead].sumPower, d_sumPower_OFF, sizeof(float), cudaMemcpyDeviceToHost, sD2H));
         m_hring[m_hhead].noise_state = NoiseState::OFF;
 
         // Complete D2H on the GPU worker before exposing this host slot.
@@ -754,8 +791,8 @@ public:
         CUDA_CHECK(cudaEventSynchronize(m_hring[m_hhead].event));
         m_acc_id = 0;
         m_hring[m_hhead].used.store(true, std::memory_order_release);
-        cudaMemsetAsync(d_sumPower_OFF,0,sizeof(float),sD2H);
-        cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H); 
+        CUDA_CHECK(cudaMemsetAsync(d_sumPower_OFF,0,sizeof(float),sD2H));
+        CUDA_CHECK(cudaMemsetAsync(m_acc_stokes_OFF, 0, m_Nfft * sizeof(float4), sD2H));
         m_hhead = (m_hhead + 1) % NUM_SLOTS;
       }
     }
@@ -816,6 +853,9 @@ private:
   uint64_t m_timestamp_ns = 0;
   NoiseState m_noise_state = NoiseState::OFF;
   uint64_t m_noise_cycle_start_ns = 0;
+  NoiseState m_last_input_noise_state = NoiseState::OFF;
+  size_t m_noise_uniform_blocks = 0;
+  bool m_noise_output_valid = false;
   uint32_t m_acc_on_id = 0;
   uint32_t m_acc_off_id = 0;
   uint64_t m_acc_on_first_timestamp_ns = 0;

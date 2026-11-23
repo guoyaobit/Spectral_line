@@ -248,6 +248,14 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
 - `integration_t`, `win_bw`, and `win_channels`: determine FFT length and
   integration. The computed FFT length must be a multiple of 4096 and at least
   65536.
+  `integration_t` accepts fractional seconds and must be finite and positive.
+  The duration is rounded down to complete FFT intervals, with at least one
+  interval; requests exceeding the supported integer FFT count are rejected.
+- `noise_source.period_ms`, `duty_cycle` and `transition_blank_ms`: accept
+  fractional values. Time values must be finite and fit integer nanoseconds;
+  the cycle must be nonzero and both ON/OFF durations at least 1 ns. Duty cycle
+  must be strictly between 0 and 100, and blanking time non-negative. These
+  parameters describe the external noise source; they do not drive its switch.
 - `subbands[].windows[].center_freq`: requested center frequency for each
   spectral window. All windows use the global `win_bw` and `win_channels`.
   Frequencies are calculated in double precision and the requested window is

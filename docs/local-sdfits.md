@@ -111,6 +111,10 @@ the following are identical between local and Recorder output:
 - one row per integration and four-float backend-product payload per channel;
 - output filename convention.
 
+When supplying an `Observation_ID`, use a fresh value for each observation.
+If the target SDFITS file already exists, both writers log a warning once and
+skip that output for the rest of the run. The existing file is preserved.
+
 The files need not be byte-for-byte identical because their creation
 timestamps and row arrival histories can differ. Their scientific data layout
 is the same, so the same Python/Astropy reduction can read either file.

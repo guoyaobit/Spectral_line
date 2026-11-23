@@ -131,6 +131,13 @@ sdfits *LocalSdfitsWriter::get_or_create_writer(
                             header.cal_mode != 0,
                             GlobalConfig::getInstance().source_on);
   const int status = writer->sdfits_create();
+  if (status == SDFITS_OUTPUT_EXISTS) {
+    GlobalConfig::getInstance().logger_->warn(
+        "Local SDFITS already exists: {}. Skipping this output for this run.",
+        writer->filename);
+    writers_.emplace(key, nullptr);
+    return nullptr;
+  }
   if (status != 0) {
     GlobalConfig::getInstance().logger_->error(
         "Failed to create local SDFITS for subband {}, window {}, status={}",
@@ -180,7 +187,7 @@ void LocalSdfitsWriter::run() {
     write_job(job);
   }
   for (auto &entry : writers_)
-    entry.second->sdfits_close();
+    if (entry.second) entry.second->sdfits_close();
   writers_.clear();
 }
 

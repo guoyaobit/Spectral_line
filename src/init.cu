@@ -72,7 +72,7 @@ void freeDataBatch(PacketBatch *batch) {
 
 void subband_thread(int subband_id) {
   auto &cfg = GlobalConfig::getInstance();
-  cudaSetDevice(cfg.subbands[subband_id]->gpu_id);
+  CUDA_CHECK(cudaSetDevice(cfg.subbands[subband_id]->gpu_id));
   {
     std::lock_guard<std::mutex> lock(cfg.init_mutex);
     cfg.ready_threads++;
