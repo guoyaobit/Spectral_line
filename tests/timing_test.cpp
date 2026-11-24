@@ -97,8 +97,8 @@ int main()
 
     const std::string automatic_id = automatic_observation_directory_id();
     if (!observation_id_is_valid(automatic_id) ||
-        automatic_id.size() != 20 || automatic_id[8] != 'T' ||
-        automatic_id[15] != '.' || automatic_id.back() != 'Z')
+        automatic_id.size() != 24 || automatic_id[10] != '_' ||
+        automatic_id[19] != '.' || automatic_id.back() != 'Z')
         return 16;
 
     constexpr double boundary = 0.126208;

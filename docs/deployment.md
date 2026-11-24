@@ -242,7 +242,10 @@ Copy and edit `config.yaml` for the observing setup. Important fields:
   and continuum modes publish its CRC32C value in `spectrum_header.obs_id`
   in the version-3 header. If it is omitted, null, or an
   empty string, spectrum modes publish `obs_id=0`; baseband mode creates an
-  ISO-8601 basic UTC directory such as `20260925T143012.317Z` locally.
+  UTC directory such as `2026-09-25_14-30-12.317Z` locally. Local SDFITS
+  directories include the source and state first, e.g.
+  `test_ON_2026-09-25_14-30-12.317Z`. Long source names are truncated to keep
+  the directory name within 64 characters while preserving the timestamp and ON/OFF state.
 - `Memory_pool_per_stream`: pinned/RAM pool in GiB. Total allocation scales with
   enabled streams; start conservatively.
 - `integration_t`, `win_bw`, and `win_channels`: determine FFT length and
