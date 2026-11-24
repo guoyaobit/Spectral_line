@@ -140,15 +140,7 @@ static int port_init(uint16_t port, struct rte_mempool *mbuf_pool,
   int retval;
   struct rte_eth_conf port_conf{};
   port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
-  // Preserve the MTU configured by the system instead of imposing a value.
-  uint16_t current_mtu = 0;
-  retval = rte_eth_dev_get_mtu(port, &current_mtu);
-  if (retval != 0) {
-    cfg.logger_->error("Failed to read MTU on port {}: {}", port, retval);
-    return retval;
-  }
-  port_conf.rxmode.mtu = current_mtu;
-  cfg.logger_->info("Port {} using system MTU {}", port, current_mtu);
+  port_conf.rxmode.mtu = 9000;
 
   // MLX5 requires flow isolation to be enabled before device configure. The
   // actual queue rules are still created after rte_eth_dev_start(), as
